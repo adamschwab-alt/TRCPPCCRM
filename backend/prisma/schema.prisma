@@ -1,0 +1,226 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  LEADERSHIP
+  ESTIMATOR
+  PM
+  READ_ONLY
+}
+
+enum PipelineStage {
+  LEAD
+  REVIEWING_ITB
+  GO_NO_GO
+  ESTIMATING
+  BID_SUBMITTED
+  AWAITING_DECISION
+  WON
+  LOST
+  NO_BID
+  WITHDRAWN
+}
+
+enum CustomerType {
+  GC
+  DEVELOPER
+  GOVERNMENT
+  OWNER_DIRECT
+}
+
+enum RelationshipTier {
+  PLATINUM
+  GOLD
+  SILVER
+  NEW
+}
+
+enum BacklogStatus {
+  ACTIVE
+  COMPLETE
+  ON_HOLD
+  CANCELLED
+}
+
+enum GoNoGoDecision {
+  GO
+  NO_GO
+  DEFER
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  username      String    @unique
+  fullName      String
+  email         String?   @unique
+  passwordHash  String
+  role          Role
+  isActive      Boolean   @default(true)
+  mustChangePwd Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  isArchived    Boolean   @default(false)
+
+  assignedOpportunitiesEstimator Opportunity[] @relation("EstimatorAssignment")
+  assignedOpportunitiesPM        Opportunity[] @relation("PMAssignment")
+  ownedCustomers                 Customer[]    @relation("CustomerOwner")
+  notes                          OpportunityNote[]
+  goNoGoApprovals                GoNoGoDecisionRecord[] @relation("GoNoGoApprover")
+}
+
+model Customer {
+  id              Int           @id @default(autoincrement())
+  companyName     String
+  primaryContact  String?
+  phone           String?
+  email           String?
+  customerType    CustomerType  @default(GC)
+  tier            RelationshipTier @default(NEW)
+  lastLook        Boolean       @default(false)
+  ownerId         Int?
+  owner           User?         @relation("CustomerOwner", fields: [ownerId], references: [id])
+  notes           String?
+  isArchived      Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  createdById     Int?
+  updatedById     Int?
+
+  opportunities Opportunity[]
+}
+
+model Opportunity {
+  id                    Int            @id @default(autoincrement())
+  projectNumber         String         @unique
+  projectName           String
+  customerName          String
+  customerId            Int?
+  customer              Customer?      @relation(fields: [customerId], references: [id])
+  customerType          CustomerType   @default(GC)
+  projectType           String
+  region                String
+  scopeOfWork           String[]       @default([])
+  estimatedValueCents   BigInt         @default(0)
+  actualValueCents      BigInt?
+  winningBidCents       BigInt?
+  bidMarginPct          Float          @default(6.0)
+  expectedMarginPct     Float?
+  bidDueDate            DateTime?
+  estimatedStartDate    DateTime?
+  estimatedDurationMonths Int?
+  stage                 PipelineStage  @default(LEAD)
+  bondingRequired       Boolean        @default(false)
+  bondAmountCents       BigInt?
+  estimatorId           Int?
+  estimator             User?          @relation("EstimatorAssignment", fields: [estimatorId], references: [id])
+  pmId                  Int?
+  pm                    User?          @relation("PMAssignment", fields: [pmId], references: [id])
+  source                String?
+  competitive           Boolean        @default(true)
+  lastLook              Boolean        @default(false)
+  lossReason            String?
+  winningBidder         String?
+  noBidReason           String?
+  goNoGoScore           Float?
+  backlogStatus         BacklogStatus  @default(ACTIVE)
+  stageChangedAt        DateTime       @default(now())
+  bidSubmittedAt        DateTime?
+  decidedAt             DateTime?
+
+  isArchived            Boolean        @default(false)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  createdById           Int?
+  updatedById           Int?
+
+  notes               OpportunityNote[]
+  stageHistory        StageHistory[]
+  goNoGoDecisions     GoNoGoDecisionRecord[]
+
+  @@index([stage])
+  @@index([estimatorId])
+  @@index([customerId])
+  @@index([region])
+  @@index([projectType])
+}
+
+model OpportunityNote {
+  id            Int         @id @default(autoincrement())
+  opportunityId Int
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  authorId      Int
+  author        User        @relation(fields: [authorId], references: [id])
+  body          String
+  createdAt     DateTime    @default(now())
+}
+
+model StageHistory {
+  id            Int            @id @default(autoincrement())
+  opportunityId Int
+  opportunity   Opportunity    @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  fromStage     PipelineStage?
+  toStage       PipelineStage
+  changedById   Int?
+  changedAt     DateTime       @default(now())
+}
+
+model GoNoGoDecisionRecord {
+  id                  Int             @id @default(autoincrement())
+  opportunityId       Int
+  opportunity         Opportunity     @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  marginScore         Int
+  customerScore       Int
+  geoScore            Int
+  scopeRiskScore      Int
+  resourceScore       Int
+  bondRiskScore       Int
+  strategicScore      Int
+  compositeScore      Float
+  decision            GoNoGoDecision
+  approverId          Int?
+  approver            User?           @relation("GoNoGoApprover", fields: [approverId], references: [id])
+  conditions          String?
+  createdAt           DateTime        @default(now())
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model DropdownOption {
+  id        Int      @id @default(autoincrement())
+  category  String
+  value     String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+
+  @@unique([category, value])
+  @@index([category])
+}
+
+// ---- Phase 2 placeholder stubs (NOT yet built; reserved for future use) ----
+model PostProjectReview {
+  id              Int      @id @default(autoincrement())
+  opportunityId   Int?
+  estimatedMargin Float?
+  actualMargin    Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model IntegrationLog {
+  id        Int      @id @default(autoincrement())
+  source    String
+  payload   String?
+  status    String?
+  createdAt DateTime @default(now())
+}
