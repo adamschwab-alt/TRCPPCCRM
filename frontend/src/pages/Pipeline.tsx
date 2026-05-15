@@ -1,21 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "../api";
 import { useSettings } from "../settings";
 import { Opportunity, STAGES, STAGE_COLOR, STAGE_LABEL, Stage } from "../types";
 import Modal from "../components/Modal";
 import OpportunityForm from "../components/OpportunityForm";
 import StageChangePrompt from "../components/StageChangePrompt";
+import { isRotting, hasNoNextAction, nextActionStatus, daysSince, rottingDays } from "../hygiene";
 
 type View = "kanban" | "list";
 
 export default function Pipeline() {
-  const { dropdowns } = useSettings();
+  const { dropdowns, settings } = useSettings();
   const [view, setView] = useState<View>("kanban");
   const [ops, setOps] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("");
+  const [hygieneFilter, setHygieneFilter] = useState<"" | "stale" | "needs_action">("");
   const [regionFilter, setRegionFilter] = useState<string>("");
   const [showFilters, setShowFilters] = useState(false);
   const [estimatorFilter, setEstimatorFilter] = useState<string>("");
@@ -27,6 +29,12 @@ export default function Pipeline() {
   const [stagePrompt, setStagePrompt] = useState<{ op: Opportunity; stage: Stage } | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const f = searchParams.get("filter");
+    if (f === "stale" || f === "needs_action") setHygieneFilter(f);
+  }, [searchParams]);
 
   async function load() {
     setLoading(true);
@@ -60,9 +68,14 @@ export default function Pipeline() {
       if (projectTypeFilter && o.projectType !== projectTypeFilter) return false;
       if (customerTypeFilter && o.customerType !== customerTypeFilter) return false;
       if (bondingFilter && String(o.bondingRequired) !== bondingFilter) return false;
+      if (hygieneFilter === "stale" && !isRotting(o, settings)) return false;
+      if (hygieneFilter === "needs_action" && !hasNoNextAction(o)) return false;
       return true;
     });
-  }, [ops, search, stageFilter, regionFilter, estimatorFilter, projectTypeFilter, customerTypeFilter, bondingFilter]);
+  }, [ops, search, stageFilter, regionFilter, estimatorFilter, projectTypeFilter, customerTypeFilter, bondingFilter, hygieneFilter, settings]);
+
+  const staleCount = useMemo(() => ops.filter((o) => isRotting(o, settings)).length, [ops, settings]);
+  const needsActionCount = useMemo(() => ops.filter(hasNoNextAction).length, [ops]);
 
   const byStage = useMemo(() => {
     const m: Record<string, Opportunity[]> = {};
@@ -197,6 +210,30 @@ export default function Pipeline() {
         })}
       </div>
 
+      {/* Hygiene chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setHygieneFilter(hygieneFilter === "stale" ? "" : "stale")}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+            hygieneFilter === "stale"
+              ? "bg-yellow-500 text-white border-yellow-500"
+              : "bg-white border-gray-300 hover:border-yellow-500"
+          }`}
+        >
+          Stale {staleCount > 0 && `(${staleCount})`}
+        </button>
+        <button
+          onClick={() => setHygieneFilter(hygieneFilter === "needs_action" ? "" : "needs_action")}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+            hygieneFilter === "needs_action"
+              ? "bg-redland-red text-white border-redland-red"
+              : "bg-white border-gray-300 hover:border-redland-red"
+          }`}
+        >
+          Needs action {needsActionCount > 0 && `(${needsActionCount})`}
+        </button>
+      </div>
+
       {/* Search + filter row */}
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -208,7 +245,7 @@ export default function Pipeline() {
         <button onClick={() => setShowFilters((v) => !v)} className="btn-ghost">
           {showFilters ? "▾ Filters" : "▸ Filters"}
         </button>
-        {(stageFilter || regionFilter || estimatorFilter || projectTypeFilter || customerTypeFilter || bondingFilter) && (
+        {(stageFilter || regionFilter || estimatorFilter || projectTypeFilter || customerTypeFilter || bondingFilter || hygieneFilter) && (
           <button
             onClick={() => {
               setStageFilter("");
@@ -217,6 +254,7 @@ export default function Pipeline() {
               setProjectTypeFilter("");
               setCustomerTypeFilter("");
               setBondingFilter("");
+              setHygieneFilter("");
             }}
             className="text-xs text-redland-red font-semibold"
           >
@@ -297,40 +335,64 @@ export default function Pipeline() {
                 <div className="text-xs font-bold text-gray-500">{byStage[s].length}</div>
               </div>
               <div className="space-y-2">
-                {byStage[s].map((o) => (
-                  <Link
-                    key={o.id}
-                    to={`/opportunities/${o.id}`}
-                    draggable
-                    onDragStart={() => setDrag(o.id)}
-                    className="block bg-white rounded-md border border-gray-200 p-2 hover:border-redland-red hover:shadow-sm cursor-pointer"
-                  >
-                    <div className="text-xs text-gray-500 font-mono">{o.projectNumber}</div>
-                    <div className="font-bold text-sm text-redland-charcoal leading-tight">
-                      {o.projectName}
-                    </div>
-                    <div className="text-xs text-gray-700">{o.customerName}</div>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <div className="text-sm font-bold text-redland-red">
-                        {fmtMoney(o.estimatedValueCents)}
+                {byStage[s].map((o) => {
+                  const rotting = isRotting(o, settings);
+                  const noAction = hasNoNextAction(o);
+                  const actionState = nextActionStatus(o);
+                  const idle = daysSince(o.lastActivityAt);
+                  const threshold = rottingDays(o.stage, settings);
+                  return (
+                    <Link
+                      key={o.id}
+                      to={`/opportunities/${o.id}`}
+                      draggable
+                      onDragStart={() => setDrag(o.id)}
+                      className={`block rounded-md border-l-4 p-2 hover:shadow-sm cursor-pointer ${
+                        rotting
+                          ? "bg-yellow-50 border-l-yellow-500 border-y border-r border-yellow-200"
+                          : "bg-white border-l-transparent border-gray-200 border hover:border-redland-red"
+                      }`}
+                      title={rotting && idle != null ? `Stale — no activity for ${Math.floor(idle)} days (threshold ${threshold})` : undefined}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-gray-500 font-mono">{o.projectNumber}</div>
+                        <div className="flex items-center gap-1">
+                          {rotting && <span title="Stale" className="text-yellow-600 text-xs">⏰</span>}
+                          {noAction && <span title="No next action" className="text-redland-red text-xs">!</span>}
+                          {actionState === "overdue" && <span title="Action overdue" className="text-red-700 text-xs">⚠</span>}
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500">{fmtDate(o.bidDueDate)}</div>
-                    </div>
-                    {o.goNoGoScore != null && (
-                      <div
-                        className={`mt-1 text-[0.7rem] font-bold inline-block px-1.5 py-0.5 rounded ${
-                          o.goNoGoScore > 70
-                            ? "bg-green-100 text-green-800"
-                            : o.goNoGoScore >= 50
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
-                      >
-                        Score: {Math.round(o.goNoGoScore)}
+                      <div className="font-bold text-sm text-redland-charcoal leading-tight">
+                        {o.projectName}
                       </div>
-                    )}
-                  </Link>
-                ))}
+                      <div className="text-xs text-gray-700">{o.customerName}</div>
+                      <div className="flex items-center justify-between mt-1.5">
+                        <div className="text-sm font-bold text-redland-red">
+                          {fmtMoney(o.estimatedValueCents)}
+                        </div>
+                        <div className="text-xs text-gray-500">{fmtDate(o.bidDueDate)}</div>
+                      </div>
+                      {o.nextActionDate && (
+                        <div className={`text-[0.7rem] mt-1 ${actionState === "overdue" ? "text-red-700 font-semibold" : actionState === "due" ? "text-redland-red font-semibold" : "text-gray-500"}`}>
+                          Next: {fmtDate(o.nextActionDate)} — {o.nextActionNote || "(no note)"}
+                        </div>
+                      )}
+                      {o.goNoGoScore != null && (
+                        <div
+                          className={`mt-1 text-[0.7rem] font-bold inline-block px-1.5 py-0.5 rounded ${
+                            o.goNoGoScore > 70
+                              ? "bg-green-100 text-green-800"
+                              : o.goNoGoScore >= 50
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          Score: {Math.round(o.goNoGoScore)}
+                        </div>
+                      )}
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           ))}

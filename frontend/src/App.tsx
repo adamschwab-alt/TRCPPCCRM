@@ -11,6 +11,7 @@ import AcceptInvite from "./pages/AcceptInvite";
 import Signup from "./pages/Signup";
 import Profile from "./pages/Profile";
 import Dashboard from "./pages/Dashboard";
+import Today from "./pages/Today";
 import Pipeline from "./pages/Pipeline";
 import OpportunityDetail from "./pages/OpportunityDetail";
 import BidAnalytics from "./pages/BidAnalytics";
@@ -71,6 +72,14 @@ export default function App() {
           />
           <Route
             path="/"
+            element={
+              <Protected>
+                <Today />
+              </Protected>
+            }
+          />
+          <Route
+            path="/insights"
             element={
               <Protected>
                 <ModuleGate mod="dashboard">

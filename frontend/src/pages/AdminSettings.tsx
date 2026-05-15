@@ -278,6 +278,19 @@ export default function AdminSettings() {
           </div>
 
           <div className="card p-4 space-y-3">
+            <div className="font-bold text-redland-charcoal">Pipeline rotting thresholds (days)</div>
+            <p className="text-xs text-gray-600">Deals with no activity (notes, stage changes, edits) for this many days show up as <strong>Stale</strong> on the pipeline. Set to 0 to disable for a stage.</p>
+            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {["LEAD", "REVIEWING_ITB", "GO_NO_GO", "ESTIMATING", "BID_SUBMITTED", "AWAITING_DECISION", "WON"].map((st) => (
+                <div key={st}>
+                  <label className="label text-xs">{st.replace(/_/g, " ")}</label>
+                  <input type="number" min={0} className="input" value={local[`rot_${st}`] || ""} onChange={(e) => set(`rot_${st}`, e.target.value)} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card p-4 space-y-3">
             <div className="font-bold text-redland-charcoal">Go/No-Go Scoring Weights</div>
             <p className="text-xs text-gray-600">Recommended total: 100. Current total: <strong>{weightTotal}</strong></p>
             <div className="grid sm:grid-cols-2 gap-3">

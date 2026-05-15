@@ -712,6 +712,8 @@ const opportunityWriteSchema = z.object({
   projectName: z.string().min(1),
   customerName: z.string().min(1),
   customerId: z.number().int().nullable().optional(),
+  nextActionDate: z.string().nullable().optional(),
+  nextActionNote: z.string().nullable().optional(),
   customerType: z
     .enum(["GC", "DEVELOPER", "GOVERNMENT", "OWNER_DIRECT"])
     .optional(),
@@ -778,6 +780,8 @@ function mapInputToData(input: z.infer<typeof opportunityWriteSchema>) {
   if (input.estimatedStartDate)
     data.estimatedStartDate = new Date(input.estimatedStartDate);
   else if (input.estimatedStartDate === null) data.estimatedStartDate = null;
+  if (input.nextActionDate) data.nextActionDate = new Date(input.nextActionDate);
+  else if (input.nextActionDate === null) data.nextActionDate = null;
   return data;
 }
 
@@ -899,6 +903,7 @@ app.put(
         : null;
     if (stageChanged) {
       data.stageChangedAt = new Date();
+      data.lastActivityAt = new Date();
       if (stageChanged === "BID_SUBMITTED") data.bidSubmittedAt = new Date();
       if (
         stageChanged === "WON" ||
@@ -954,6 +959,10 @@ app.post(
       data: { opportunityId: id, authorId: req.user!.id, body },
       include: { author: { select: { id: true, fullName: true } } },
     });
+    await prisma.opportunity.update({
+      where: { id },
+      data: { lastActivityAt: new Date() },
+    });
     res.json(note);
   }
 );
@@ -1000,6 +1009,29 @@ app.post(
       (s.bondRiskScore / 5) * wb +
       (s.strategicScore / 5) * ws;
 
+    // Three-axis rollup (Vantagepoint-style): bucket the 7 criteria into
+    // Client / Project / Competition for at-a-glance decision support.
+    const pct = (n: number) => (n / 5) * 100;
+    const clientScore =
+      (pct(s.customerScore) * wc + pct(s.geoScore) * wg + pct(s.strategicScore) * ws) /
+      (wc + wg + ws);
+    const projectScore =
+      (pct(s.marginScore) * wm + pct(s.scopeRiskScore) * wsr + pct(s.bondRiskScore) * wb) /
+      (wm + wsr + wb);
+    const competitionScore = pct(s.resourceScore);
+
+    // Decision band: combines composite score with $ thresholds → who must approve.
+    const opportunity = await prisma.opportunity.findUnique({ where: { id } });
+    const valueDollars = opportunity ? Number(opportunity.estimatedValueCents) / 100 : 0;
+    const davidLimit = parseFloat((settings.find((r) => r.key === "go_no_go_threshold_david")?.value) || "5000000");
+    const chadLimit = parseFloat((settings.find((r) => r.key === "go_no_go_threshold_chad")?.value) || "15000000");
+    let band: string;
+    if (composite < 50) band = "NO_GO_RECOMMENDED";
+    else if (valueDollars > chadLimit) band = "TIER_2_APPROVAL"; // Chad + Pinky
+    else if (valueDollars > davidLimit) band = "TIER_1_APPROVAL"; // David recommends, Chad approves
+    else if (composite >= 70) band = "AUTO_GO";
+    else band = "MANAGEMENT_REVIEW";
+
     const rec = await prisma.goNoGoDecisionRecord.create({
       data: {
         opportunityId: id,
@@ -1018,9 +1050,16 @@ app.post(
     });
     await prisma.opportunity.update({
       where: { id },
-      data: { goNoGoScore: composite },
+      data: {
+        goNoGoScore: composite,
+        goNoGoClientScore: clientScore,
+        goNoGoProjectScore: projectScore,
+        goNoGoCompetitionScore: competitionScore,
+        goNoGoDecisionBand: band,
+        lastActivityAt: new Date(),
+      },
     });
-    res.json(rec);
+    res.json({ ...rec, clientScore, projectScore, competitionScore, band });
   }
 );
 
@@ -1160,6 +1199,7 @@ app.get("/api/analytics/summary", authRequired, async (_req, res) => {
       lossReason: true,
       noBidReason: true,
       source: true,
+      customerId: true,
     },
   });
   const byStage: Record<string, { count: number; valueCents: bigint }> = {};
@@ -1290,6 +1330,62 @@ app.get("/api/analytics/summary", authRequired, async (_req, res) => {
     .sort((a, b) => (b.revenueCents > a.revenueCents ? 1 : -1))
     .slice(0, 10);
 
+  // Weighted-fee hit rate by customer / estimator / region / type
+  // (Vantagepoint pattern) — bid$ won / bid$ pursued among decided bids.
+  // Far more meaningful than count-based win rate for an 85%-repeat shop.
+  function weightedHitRateBy(
+    field: "customerName" | "estimatorId" | "region" | "projectType" | "customerType"
+  ) {
+    const groups: Record<string, { wonCents: bigint; pursuedCents: bigint; wonCount: number; pursuedCount: number }> = {};
+    for (const o of ops) {
+      if (!["WON", "LOST"].includes(o.stage)) continue;
+      const raw = o[field];
+      const k = raw === null || raw === undefined ? "Unknown" : String(raw);
+      const g = groups[k] || { wonCents: 0n, pursuedCents: 0n, wonCount: 0, pursuedCount: 0 };
+      g.pursuedCents += o.estimatedValueCents;
+      g.pursuedCount++;
+      if (o.stage === "WON") {
+        g.wonCents += o.actualValueCents ?? o.estimatedValueCents;
+        g.wonCount++;
+      }
+      groups[k] = g;
+    }
+    return groups;
+  }
+  const hitRateByCustomer = weightedHitRateBy("customerName");
+  const hitRateByEstimator = weightedHitRateBy("estimatorId");
+  const hitRateByRegionWeighted = weightedHitRateBy("region");
+  const hitRateByTypeWeighted = weightedHitRateBy("projectType");
+  const hitRateByCustomerType = weightedHitRateBy("customerType");
+
+  // Customer-tier hit rate (joins Opportunity → Customer.tier when available)
+  // Implemented by joining customerId at query time:
+  const customersWithTier = await prisma.customer.findMany({
+    where: { isArchived: false },
+    select: { id: true, tier: true, companyName: true },
+  });
+  const tierByCustomer: Record<number, string> = {};
+  const tierByName: Record<string, string> = {};
+  for (const c of customersWithTier) {
+    tierByCustomer[c.id] = c.tier;
+    tierByName[c.companyName] = c.tier;
+  }
+  const tierGroups: Record<string, { wonCents: bigint; pursuedCents: bigint; wonCount: number; pursuedCount: number }> = {};
+  for (const o of ops) {
+    if (!["WON", "LOST"].includes(o.stage)) continue;
+    const tier = (o as any).customerId
+      ? tierByCustomer[(o as any).customerId] || "UNTIERED"
+      : tierByName[o.customerName] || "UNTIERED";
+    const g = tierGroups[tier] || { wonCents: 0n, pursuedCents: 0n, wonCount: 0, pursuedCount: 0 };
+    g.pursuedCents += o.estimatedValueCents;
+    g.pursuedCount++;
+    if (o.stage === "WON") {
+      g.wonCents += o.actualValueCents ?? o.estimatedValueCents;
+      g.wonCount++;
+    }
+    tierGroups[tier] = g;
+  }
+
   res.json({
     counts: {
       total: ops.length,
@@ -1307,8 +1403,150 @@ app.get("/api/analytics/summary", authRequired, async (_req, res) => {
     rateByRegion: rateBy("region"),
     rateByProjectType: rateBy("projectType"),
     rateByCustomerType: rateBy("customerType"),
+    hitRateByCustomer,
+    hitRateByEstimator,
+    hitRateByRegionWeighted,
+    hitRateByTypeWeighted,
+    hitRateByCustomerType,
+    hitRateByTier: tierGroups,
     estimatorStats,
     topCustomers,
+  });
+});
+
+/* ===================== TODAY WORKSPACE ===================== */
+// Returns: tasks due / overdue, stale (rotted) deals, suggested actions,
+// recent wins/losses. Driven by hardcoded rules — no ML, no AI.
+app.get("/api/dashboard/today", authRequired, async (req: AuthRequest, res) => {
+  const now = new Date();
+  const userId = req.user!.id;
+  const isPersonal = req.query.scope === "mine";
+
+  // Rotting thresholds (days) by stage, from settings
+  const settings = await prisma.setting.findMany({ where: { key: { startsWith: "rot_" } } });
+  const rotMap: Record<string, number> = {};
+  for (const s of settings) rotMap[s.key.replace("rot_", "")] = parseFloat(s.value);
+
+  const ops = await prisma.opportunity.findMany({
+    where: {
+      isArchived: false,
+      stage: { notIn: ["WON", "LOST", "NO_BID", "WITHDRAWN"] },
+      ...(isPersonal ? { estimatorId: userId } : {}),
+    },
+    include: {
+      estimator: { select: { id: true, fullName: true } },
+      customer: { select: { id: true, tier: true } },
+    },
+  });
+
+  // Build views
+  const tasksDue: any[] = [];
+  const tasksOverdue: any[] = [];
+  const stale: any[] = [];
+  const needsAction: any[] = [];
+  const goNoGoPending: any[] = [];
+  const overdueBids: any[] = [];
+
+  for (const o of ops) {
+    const rot = rotMap[o.stage] ?? 0;
+    const daysIdle = (now.getTime() - new Date(o.lastActivityAt).getTime()) / 86_400_000;
+    const isStale = rot > 0 && daysIdle >= rot;
+
+    if (o.nextActionDate) {
+      const due = new Date(o.nextActionDate);
+      const isToday = due.toDateString() === now.toDateString();
+      if (due < now && !isToday) tasksOverdue.push({ ...o, daysIdle });
+      else if (isToday || due.getTime() - now.getTime() < 86_400_000) tasksDue.push({ ...o, daysIdle });
+    } else {
+      needsAction.push({ ...o, daysIdle });
+    }
+
+    if (isStale) stale.push({ ...o, daysIdle });
+
+    // Suggested-action rules
+    if (o.stage === "REVIEWING_ITB" && daysIdle >= 2) {
+      goNoGoPending.push({ ...o, daysIdle });
+    }
+    if (
+      o.bidDueDate &&
+      new Date(o.bidDueDate) < now &&
+      ["ESTIMATING", "BID_SUBMITTED", "AWAITING_DECISION", "REVIEWING_ITB"].includes(o.stage)
+    ) {
+      overdueBids.push({ ...o, daysIdle });
+    }
+  }
+
+  // Suggested actions (top N): generate human-readable nudges
+  const suggestions: { kind: string; opportunityId: number; projectName: string; message: string; severity: "high" | "medium" | "low" }[] = [];
+  for (const o of overdueBids.slice(0, 6)) {
+    suggestions.push({
+      kind: "overdue_bid",
+      opportunityId: o.id,
+      projectName: o.projectName,
+      message: `Bid due date passed — still in ${o.stage.replace(/_/g, " ")}`,
+      severity: "high",
+    });
+  }
+  for (const o of goNoGoPending.slice(0, 6)) {
+    suggestions.push({
+      kind: "go_no_go_pending",
+      opportunityId: o.id,
+      projectName: o.projectName,
+      message: `Reviewing ITB for ${Math.floor(o.daysIdle)} days — run Go/No-Go`,
+      severity: "medium",
+    });
+  }
+  for (const o of stale.slice(0, 6)) {
+    if (suggestions.find((s) => s.opportunityId === o.id)) continue;
+    suggestions.push({
+      kind: "stale",
+      opportunityId: o.id,
+      projectName: o.projectName,
+      message: `No activity for ${Math.floor(o.daysIdle)} days in ${o.stage.replace(/_/g, " ")}`,
+      severity: o.daysIdle > (rotMap[o.stage] ?? 0) * 2 ? "high" : "medium",
+    });
+  }
+  for (const o of needsAction.slice(0, 6)) {
+    if (suggestions.find((s) => s.opportunityId === o.id)) continue;
+    suggestions.push({
+      kind: "no_next_action",
+      opportunityId: o.id,
+      projectName: o.projectName,
+      message: `No next action scheduled`,
+      severity: "low",
+    });
+  }
+
+  // Recent wins/losses (last 14 days)
+  const since = new Date(Date.now() - 14 * 86_400_000);
+  const recentDecisions = await prisma.opportunity.findMany({
+    where: {
+      isArchived: false,
+      stage: { in: ["WON", "LOST"] },
+      decidedAt: { gte: since },
+    },
+    orderBy: { decidedAt: "desc" },
+    take: 10,
+    select: {
+      id: true,
+      projectName: true,
+      customerName: true,
+      stage: true,
+      decidedAt: true,
+      estimatedValueCents: true,
+      actualValueCents: true,
+      lossReason: true,
+    },
+  });
+
+  res.json({
+    tasksDueToday: tasksDue,
+    tasksOverdue,
+    needsActionCount: needsAction.length,
+    staleCount: stale.length,
+    overdueBidCount: overdueBids.length,
+    suggestions: suggestions.slice(0, 12),
+    recentDecisions,
   });
 });
 

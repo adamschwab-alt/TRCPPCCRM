@@ -20,15 +20,81 @@ const COLORS = ["#8B1A1A", "#C9A84C", "#2D2D2D", "#6e1414", "#dcc16f", "#a52424"
 
 export default function BidAnalytics() {
   const [s, setS] = useState<any>(null);
+  const [users, setUsers] = useState<any[]>([]);
 
   useEffect(() => {
     api("/api/analytics/summary").then(setS);
+    api("/api/users").then(setUsers).catch(() => {});
   }, []);
 
   if (!s) return <div className="text-gray-500">Loading…</div>;
 
   const lossPie = Object.entries(s.lossReasons || {}).map(([k, v]) => ({ name: k, value: v as number }));
   const noBidPie = Object.entries(s.noBidReasons || {}).map(([k, v]) => ({ name: k, value: v as number }));
+
+  function weightedHitRateTable(title: string, groups: any, opts?: { topN?: number; nameMap?: Record<string, string> }) {
+    const rows = Object.entries(groups || {})
+      .map(([k, v]: any) => {
+        const won = Number(v.wonCents);
+        const pursued = Number(v.pursuedCents);
+        return {
+          name: opts?.nameMap?.[k] ?? k,
+          wonCents: won,
+          pursuedCents: pursued,
+          wonCount: v.wonCount,
+          pursuedCount: v.pursuedCount,
+          hitRate: pursued > 0 ? won / pursued : 0,
+        };
+      })
+      .sort((a, b) => b.pursuedCents - a.pursuedCents);
+    const top = opts?.topN ? rows.slice(0, opts.topN) : rows;
+    return (
+      <div className="card p-4">
+        <div className="font-bold text-redland-charcoal mb-2">{title}</div>
+        <table className="w-full text-sm">
+          <thead className="text-xs text-gray-500 uppercase">
+            <tr>
+              <th className="text-left py-1">Group</th>
+              <th className="text-right">Bid $</th>
+              <th className="text-right">Won $</th>
+              <th className="text-right">Hit $</th>
+              <th className="text-right">Hit #</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((r) => (
+              <tr key={r.name} className="border-t">
+                <td className="py-1.5 font-semibold truncate max-w-[200px]">{r.name}</td>
+                <td className="text-right">{fmtMoney(r.pursuedCents)}</td>
+                <td className="text-right">{fmtMoney(r.wonCents)}</td>
+                <td className="text-right">
+                  <span className={`font-bold ${r.hitRate >= 0.5 ? "text-green-700" : r.hitRate >= 0.25 ? "text-yellow-700" : "text-red-700"}`}>
+                    {Math.round(r.hitRate * 100)}%
+                  </span>
+                </td>
+                <td className="text-right text-xs text-gray-500">{r.wonCount} / {r.pursuedCount}</td>
+              </tr>
+            ))}
+            {top.length === 0 && (
+              <tr>
+                <td colSpan={5} className="text-center text-gray-500 py-4">No decided bids yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  const estimatorNames: Record<string, string> = {};
+  for (const u of users) estimatorNames[String(u.id)] = u.fullName;
+  const tierLabels: Record<string, string> = {
+    PLATINUM: "Platinum",
+    GOLD: "Gold",
+    SILVER: "Silver",
+    NEW: "New",
+    UNTIERED: "Untiered",
+  };
 
   function rateTable(title: string, groups: any) {
     return (
@@ -111,10 +177,23 @@ export default function BidAnalytics() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        {rateTable("Win Rate by Region", s.rateByRegion)}
-        {rateTable("Win Rate by Project Type", s.rateByProjectType)}
-        {rateTable("Win Rate by Customer Type", s.rateByCustomerType)}
+      <div className="space-y-2">
+        <div className="text-xs uppercase font-bold text-gray-500 tracking-wide">Weighted hit rate ($ won / $ bid) — Vantagepoint-style, the metric that matters most</div>
+        <div className="grid lg:grid-cols-2 gap-4">
+          {weightedHitRateTable("Top customers", s.hitRateByCustomer, { topN: 12 })}
+          {weightedHitRateTable("By customer tier", s.hitRateByTier, { nameMap: tierLabels })}
+          {weightedHitRateTable("By estimator", s.hitRateByEstimator, { nameMap: estimatorNames })}
+          {weightedHitRateTable("By customer type", s.hitRateByCustomerType, { nameMap: { GC: "GC", DEVELOPER: "Developer", GOVERNMENT: "Government", OWNER_DIRECT: "Owner-Direct" } })}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-xs uppercase font-bold text-gray-500 tracking-wide">Count-based win rate (legacy view)</div>
+        <div className="grid lg:grid-cols-3 gap-4">
+          {rateTable("By Region", s.rateByRegion)}
+          {rateTable("By Project Type", s.rateByProjectType)}
+          {rateTable("By Customer Type", s.rateByCustomerType)}
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">

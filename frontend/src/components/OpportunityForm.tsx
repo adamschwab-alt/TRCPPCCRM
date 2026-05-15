@@ -44,6 +44,8 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
     source: initial?.source || "",
     competitive: initial?.competitive ?? true,
     lastLook: initial?.lastLook || false,
+    nextActionDate: initial?.nextActionDate ? initial.nextActionDate.substring(0, 10) : "",
+    nextActionNote: initial?.nextActionNote || "",
   });
 
   useEffect(() => {
@@ -98,6 +100,8 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
         source: f.source || null,
         competitive: f.competitive,
         lastLook: f.lastLook,
+        nextActionDate: f.nextActionDate || null,
+        nextActionNote: f.nextActionNote || null,
       };
       const isEdit = !!initial?.id;
       const res = await api<Opportunity>(
@@ -187,6 +191,20 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
             <option value="GOVERNMENT">Government</option>
             <option value="OWNER_DIRECT">Owner-Direct</option>
           </select>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-redland-gold/40 bg-redland-gold/5 p-3 space-y-2">
+        <div className="text-xs font-semibold text-redland-charcoal uppercase">Next Action <span className="text-gray-500 font-normal lowercase">(strongly recommended)</span></div>
+        <div className="grid sm:grid-cols-3 gap-2">
+          <div>
+            <label className="label !text-xs">Due date</label>
+            <input type="date" className="input" value={f.nextActionDate} onChange={(e) => set("nextActionDate", e.target.value)} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label !text-xs">What needs to happen?</label>
+            <input className="input" placeholder="e.g. call GC for status, finish drainage takeoff" value={f.nextActionNote} onChange={(e) => set("nextActionNote", e.target.value)} />
+          </div>
         </div>
       </div>
 

@@ -180,10 +180,17 @@ model Opportunity {
   winningBidder         String?
   noBidReason           String?
   goNoGoScore           Float?
+  goNoGoClientScore     Float?
+  goNoGoProjectScore    Float?
+  goNoGoCompetitionScore Float?
+  goNoGoDecisionBand    String?
   backlogStatus         BacklogStatus  @default(ACTIVE)
   stageChangedAt        DateTime       @default(now())
   bidSubmittedAt        DateTime?
   decidedAt             DateTime?
+  lastActivityAt        DateTime       @default(now())
+  nextActionDate        DateTime?
+  nextActionNote        String?
 
   isArchived            Boolean        @default(false)
   createdAt             DateTime       @default(now())
@@ -200,6 +207,8 @@ model Opportunity {
   @@index([customerId])
   @@index([region])
   @@index([projectType])
+  @@index([nextActionDate])
+  @@index([lastActivityAt])
 }
 
 model OpportunityNote {

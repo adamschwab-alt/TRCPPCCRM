@@ -109,6 +109,18 @@ const SETTINGS: Record<string, string> = {
   require_2fa_admin: "false",
   password_min_length: "8",
   password_require_mixed: "false",
+  // Rotting thresholds (days) — when an opportunity in this stage hasn't seen
+  // activity for this many days, it shows up as "stale" on the pipeline.
+  rot_LEAD: "21",
+  rot_REVIEWING_ITB: "5",
+  rot_GO_NO_GO: "3",
+  rot_ESTIMATING: "7",
+  rot_BID_SUBMITTED: "7",
+  rot_AWAITING_DECISION: "14",
+  rot_WON: "60",
+  rot_LOST: "0",
+  rot_NO_BID: "0",
+  rot_WITHDRAWN: "0",
 };
 
 async function main() {

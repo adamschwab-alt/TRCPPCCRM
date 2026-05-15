@@ -10,10 +10,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const nav = useNavigate();
 
   const links: { to: string; label: string; show: boolean }[] = [
-    { to: "/", label: "Dashboard", show: enabled("dashboard") },
+    { to: "/", label: "Today", show: true },
     { to: "/pipeline", label: "Pipeline", show: true },
+    { to: "/insights", label: "Insights", show: enabled("dashboard") },
     { to: "/analytics", label: "Bid Analytics", show: enabled("bid_analytics") },
-    { to: "/workload", label: "Estimator Workload", show: enabled("estimator_workload") },
+    { to: "/workload", label: "Workload", show: enabled("estimator_workload") },
     { to: "/customers", label: "Customers", show: enabled("customer_mgmt") },
     { to: "/backlog", label: "Backlog", show: enabled("backlog") },
   ];

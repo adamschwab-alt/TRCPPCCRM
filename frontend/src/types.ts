@@ -95,8 +95,15 @@ export interface Opportunity {
   winningBidder?: string | null;
   noBidReason?: string | null;
   goNoGoScore?: number | null;
+  goNoGoClientScore?: number | null;
+  goNoGoProjectScore?: number | null;
+  goNoGoCompetitionScore?: number | null;
+  goNoGoDecisionBand?: string | null;
   backlogStatus: "ACTIVE" | "COMPLETE" | "ON_HOLD" | "CANCELLED";
   stageChangedAt: string;
+  lastActivityAt?: string;
+  nextActionDate?: string | null;
+  nextActionNote?: string | null;
   bidSubmittedAt?: string | null;
   decidedAt?: string | null;
   notes?: Note[];
