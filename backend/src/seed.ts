@@ -5,19 +5,19 @@ const prisma = new PrismaClient();
 
 const DEFAULT_PASSWORD = "Redland2026!";
 
-const USERS: Array<{ username: string; fullName: string; role: Role }> = [
-  { username: "chad.munz", fullName: "Chad Munz", role: "LEADERSHIP" },
-  { username: "pinky.munz", fullName: "Pinky Munz", role: "LEADERSHIP" },
-  { username: "david.merring", fullName: "David Merring", role: "ESTIMATOR" },
-  { username: "jon.hegler", fullName: "Jon Hegler (Finance)", role: "READ_ONLY" },
-  { username: "eddie", fullName: "Eddie (BD)", role: "READ_ONLY" },
-  { username: "estimator2", fullName: "Estimator 2", role: "ESTIMATOR" },
-  { username: "estimator3", fullName: "Estimator 3", role: "ESTIMATOR" },
-  { username: "estimator4", fullName: "Estimator 4", role: "ESTIMATOR" },
-  { username: "pm1", fullName: "PM 1", role: "PM" },
-  { username: "pm2", fullName: "PM 2", role: "PM" },
-  { username: "pm3", fullName: "PM 3", role: "PM" },
-  { username: "adam.schwab", fullName: "Adam Schwab (PPC)", role: "ADMIN" },
+const USERS: Array<{ username: string; fullName: string; role: Role; email: string }> = [
+  { username: "chad.munz", fullName: "Chad Munz", role: "LEADERSHIP", email: "chad@redlandcompany.com" },
+  { username: "pinky.munz", fullName: "Pinky Munz", role: "LEADERSHIP", email: "pinky@redlandcompany.com" },
+  { username: "david.merring", fullName: "David Merring", role: "ESTIMATOR", email: "david.merring@redlandcompany.com" },
+  { username: "jon.hegler", fullName: "Jon Hegler (Finance)", role: "READ_ONLY", email: "jon.hegler@redlandcompany.com" },
+  { username: "eddie", fullName: "Eddie (BD)", role: "READ_ONLY", email: "eddie@redlandcompany.com" },
+  { username: "estimator2", fullName: "Estimator 2", role: "ESTIMATOR", email: "estimator2@redlandcompany.com" },
+  { username: "estimator3", fullName: "Estimator 3", role: "ESTIMATOR", email: "estimator3@redlandcompany.com" },
+  { username: "estimator4", fullName: "Estimator 4", role: "ESTIMATOR", email: "estimator4@redlandcompany.com" },
+  { username: "pm1", fullName: "PM 1", role: "PM", email: "pm1@redlandcompany.com" },
+  { username: "pm2", fullName: "PM 2", role: "PM", email: "pm2@redlandcompany.com" },
+  { username: "pm3", fullName: "PM 3", role: "PM", email: "pm3@redlandcompany.com" },
+  { username: "adam.schwab", fullName: "Adam Schwab (PPC)", role: "ADMIN", email: "adam@palmpeakcapital.com" },
 ];
 
 const DROPDOWNS: Record<string, string[]> = {
@@ -104,6 +104,8 @@ const SETTINGS: Record<string, string> = {
   weight_resource: "10",
   weight_bond_risk: "5",
   weight_strategic: "10",
+  allow_self_signup: "false",
+  app_base_url: "",
 };
 
 async function main() {
@@ -112,10 +114,11 @@ async function main() {
   for (const u of USERS) {
     await prisma.user.upsert({
       where: { username: u.username },
-      update: {},
+      update: { email: u.email },
       create: {
         username: u.username,
         fullName: u.fullName,
+        email: u.email,
         role: u.role,
         passwordHash: hash,
         mustChangePwd: true,

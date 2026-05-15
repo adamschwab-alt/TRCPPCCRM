@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { Navigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, Navigate } from "react-router-dom";
+import { api } from "../api";
 import { useAuth } from "../auth";
 
 export default function Login() {
@@ -8,6 +9,13 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [allowSignup, setAllowSignup] = useState(false);
+
+  useEffect(() => {
+    api<{ allowSelfSignup: boolean }>("/api/auth/public-config")
+      .then((c) => setAllowSignup(c.allowSelfSignup))
+      .catch(() => {});
+  }, []);
 
   if (user && !user.mustChangePwd) return <Navigate to="/" replace />;
   if (user?.mustChangePwd) return <Navigate to="/change-password" replace />;
@@ -39,7 +47,7 @@ export default function Login() {
         </div>
         <form onSubmit={submit} className="bg-white rounded-lg shadow-2xl p-6 space-y-4">
           <div>
-            <label className="label">Username</label>
+            <label className="label">Email or username</label>
             <input
               className="input"
               value={username}
@@ -49,7 +57,12 @@ export default function Login() {
             />
           </div>
           <div>
-            <label className="label">Password</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="label !mb-0">Password</label>
+              <Link to="/forgot-password" className="text-xs font-semibold text-redland-red hover:underline">
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               className="input"
@@ -70,9 +83,17 @@ export default function Login() {
           >
             {busy ? "Signing in…" : "Sign in"}
           </button>
+          {allowSignup && (
+            <div className="text-center text-sm text-gray-600 pt-2 border-t">
+              New to Redland CRM?{" "}
+              <Link to="/signup" className="font-semibold text-redland-red hover:underline">
+                Create an account
+              </Link>
+            </div>
+          )}
         </form>
         <p className="text-center text-white/60 text-xs mt-4">
-          Forgot your password? Contact the admin.
+          Need access? Ask an admin to send you an invite.
         </p>
       </div>
     </div>

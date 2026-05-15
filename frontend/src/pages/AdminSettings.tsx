@@ -39,8 +39,11 @@ export default function AdminSettings() {
   const [users, setUsers] = useState<any[]>([]);
   const [savedMsg, setSavedMsg] = useState("");
   const [tab, setTab] = useState<"modules" | "config" | "users" | "dropdowns">("modules");
-  const [newUser, setNewUser] = useState({ username: "", fullName: "", role: "ESTIMATOR" });
+  const [newUser, setNewUser] = useState({ username: "", fullName: "", email: "", role: "ESTIMATOR" });
   const [newDropdown, setNewDropdown] = useState<Record<string, string>>({});
+  const [invitations, setInvitations] = useState<any[]>([]);
+  const [newInvite, setNewInvite] = useState({ email: "", fullName: "", role: "ESTIMATOR" });
+  const [inviteMsg, setInviteMsg] = useState("");
 
   useEffect(() => {
     setLocal({ ...settings });
@@ -49,9 +52,16 @@ export default function AdminSettings() {
   async function loadUsers() {
     setUsers(await api("/api/users"));
   }
+  async function loadInvitations() {
+    if (user?.role !== "ADMIN") return;
+    try {
+      setInvitations(await api("/api/invitations"));
+    } catch {}
+  }
   useEffect(() => {
     loadUsers();
-  }, []);
+    loadInvitations();
+  }, [user?.role]);
 
   if (user?.role !== "ADMIN" && user?.role !== "LEADERSHIP") {
     return <div className="card p-6">You don't have access to this page.</div>;
@@ -70,9 +80,35 @@ export default function AdminSettings() {
 
   async function createUser() {
     if (!newUser.username || !newUser.fullName) return;
-    await api("/api/users", { method: "POST", body: JSON.stringify(newUser) });
-    setNewUser({ username: "", fullName: "", role: "ESTIMATOR" });
+    await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({ ...newUser, email: newUser.email || null }),
+    });
+    setNewUser({ username: "", fullName: "", email: "", role: "ESTIMATOR" });
     loadUsers();
+  }
+
+  async function sendInvite() {
+    setInviteMsg("");
+    if (!newInvite.email || !newInvite.fullName) return;
+    try {
+      const r = await api<{ sentTo: string }>("/api/invitations", {
+        method: "POST",
+        body: JSON.stringify(newInvite),
+      });
+      setInviteMsg(`Invitation sent to ${r.sentTo}.`);
+      setNewInvite({ email: "", fullName: "", role: "ESTIMATOR" });
+      loadInvitations();
+      setTimeout(() => setInviteMsg(""), 4000);
+    } catch (e: any) {
+      setInviteMsg(`Error: ${e.message}`);
+    }
+  }
+
+  async function revokeInvite(id: number) {
+    if (!confirm("Revoke this invitation?")) return;
+    await api(`/api/invitations/${id}`, { method: "DELETE" });
+    loadInvitations();
   }
 
   async function deactivateUser(id: number) {
@@ -175,6 +211,32 @@ export default function AdminSettings() {
           </div>
 
           <div className="card p-4 space-y-3">
+            <div className="font-bold text-redland-charcoal">Authentication</div>
+            <div className="flex items-center justify-between py-2 border-b">
+              <div>
+                <div className="font-semibold">Allow public self-signup</div>
+                <div className="text-xs text-gray-500">When OFF, only invited users can create accounts. Recommended OFF for a single-company CRM.</div>
+              </div>
+              <button
+                onClick={() => set("allow_self_signup", local.allow_self_signup === "true" ? "false" : "true")}
+                className={`relative w-12 h-6 rounded-full transition-colors ${local.allow_self_signup === "true" ? "bg-redland-red" : "bg-gray-300"}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${local.allow_self_signup === "true" ? "translate-x-6" : ""}`} />
+              </button>
+            </div>
+            <div>
+              <label className="label">App base URL (used in password reset / invite emails)</label>
+              <input
+                className="input"
+                placeholder="https://your-app.up.railway.app"
+                value={local.app_base_url || ""}
+                onChange={(e) => set("app_base_url", e.target.value)}
+              />
+              <p className="text-xs text-gray-500 mt-1">Leave blank to auto-detect from request headers (works for most hosts).</p>
+            </div>
+          </div>
+
+          <div className="card p-4 space-y-3">
             <div className="font-bold text-redland-charcoal">Go/No-Go Scoring Weights</div>
             <p className="text-xs text-gray-600">Recommended total: 100. Current total: <strong>{weightTotal}</strong></p>
             <div className="grid sm:grid-cols-2 gap-3">
@@ -194,22 +256,67 @@ export default function AdminSettings() {
       {tab === "users" && (
         <div className="space-y-4">
           {user?.role === "ADMIN" && (
-            <div className="card p-4 space-y-3">
-              <div className="font-bold text-redland-charcoal">Add User</div>
-              <div className="grid sm:grid-cols-4 gap-3">
-                <input className="input" placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
-                <input className="input" placeholder="Full name" value={newUser.fullName} onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })} />
-                <select className="input" value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
-                  <option value="ADMIN">Admin</option>
-                  <option value="LEADERSHIP">Leadership</option>
-                  <option value="ESTIMATOR">Estimator</option>
-                  <option value="PM">PM</option>
-                  <option value="READ_ONLY">Read-Only</option>
-                </select>
-                <button onClick={createUser} className="btn-primary">Add</button>
+            <>
+              <div className="card p-4 space-y-3">
+                <div className="font-bold text-redland-charcoal">Invite by email (recommended)</div>
+                <p className="text-xs text-gray-600">
+                  The invitee receives an email with a one-time link to set their own password.
+                </p>
+                <div className="grid sm:grid-cols-4 gap-3">
+                  <input className="input" placeholder="Email" type="email" value={newInvite.email} onChange={(e) => setNewInvite({ ...newInvite, email: e.target.value })} />
+                  <input className="input" placeholder="Full name" value={newInvite.fullName} onChange={(e) => setNewInvite({ ...newInvite, fullName: e.target.value })} />
+                  <select className="input" value={newInvite.role} onChange={(e) => setNewInvite({ ...newInvite, role: e.target.value })}>
+                    <option value="ADMIN">Admin</option>
+                    <option value="LEADERSHIP">Leadership</option>
+                    <option value="ESTIMATOR">Estimator</option>
+                    <option value="PM">PM</option>
+                    <option value="READ_ONLY">Read-Only</option>
+                  </select>
+                  <button onClick={sendInvite} className="btn-gold">Send Invite</button>
+                </div>
+                {inviteMsg && (
+                  <div className={`text-sm rounded p-2 ${inviteMsg.startsWith("Error") ? "bg-red-50 text-red-800 border border-red-200" : "bg-green-50 text-green-800 border border-green-200"}`}>
+                    {inviteMsg}
+                  </div>
+                )}
+                {invitations.length > 0 && (
+                  <div className="mt-2">
+                    <div className="text-xs uppercase font-semibold text-gray-500 mb-1">Pending invitations</div>
+                    <div className="space-y-1">
+                      {invitations.map((i) => (
+                        <div key={i.id} className="flex items-center justify-between text-sm bg-gray-50 rounded px-2 py-1">
+                          <div>
+                            <strong>{i.fullName}</strong> &lt;{i.email}&gt; — {i.role}
+                            <span className="text-xs text-gray-500 ml-2">expires {new Date(i.expiresAt).toLocaleDateString()}</span>
+                          </div>
+                          <button onClick={() => revokeInvite(i.id)} className="text-xs text-red-700 font-semibold hover:underline">Revoke</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <p className="text-xs text-gray-500">New users start with the default password Redland2026! and must change it on first login.</p>
-            </div>
+
+              <details className="card p-4">
+                <summary className="font-bold text-redland-charcoal cursor-pointer">Add user directly (default password)</summary>
+                <div className="mt-3 space-y-3">
+                  <div className="grid sm:grid-cols-5 gap-3">
+                    <input className="input" placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
+                    <input className="input" placeholder="Full name" value={newUser.fullName} onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })} />
+                    <input className="input" placeholder="Email (optional)" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+                    <select className="input" value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
+                      <option value="ADMIN">Admin</option>
+                      <option value="LEADERSHIP">Leadership</option>
+                      <option value="ESTIMATOR">Estimator</option>
+                      <option value="PM">PM</option>
+                      <option value="READ_ONLY">Read-Only</option>
+                    </select>
+                    <button onClick={createUser} className="btn-primary">Add</button>
+                  </div>
+                  <p className="text-xs text-gray-500">User starts with the default password Redland2026! and must change it on first login.</p>
+                </div>
+              </details>
+            </>
           )}
 
           <div className="card overflow-x-auto">
@@ -218,6 +325,7 @@ export default function AdminSettings() {
                 <tr>
                   <th className="px-3 py-2 text-left">Username</th>
                   <th className="px-3 py-2 text-left">Name</th>
+                  <th className="px-3 py-2 text-left">Email</th>
                   <th className="px-3 py-2 text-left">Role</th>
                   <th className="px-3 py-2 text-left">Active</th>
                   {user?.role === "ADMIN" && <th className="px-3 py-2 text-right">Actions</th>}
@@ -228,6 +336,7 @@ export default function AdminSettings() {
                   <tr key={u.id} className="border-t">
                     <td className="px-3 py-2 font-mono">{u.username}</td>
                     <td className="px-3 py-2 font-semibold">{u.fullName}</td>
+                    <td className="px-3 py-2 text-gray-700">{u.email || <span className="text-gray-400">—</span>}</td>
                     <td className="px-3 py-2">{u.role}</td>
                     <td className="px-3 py-2">{u.isActive ? "Yes" : "No"}</td>
                     {user?.role === "ADMIN" && (

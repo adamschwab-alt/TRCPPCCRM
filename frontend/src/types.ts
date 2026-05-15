@@ -4,9 +4,20 @@ export interface User {
   id: number;
   username: string;
   fullName: string;
+  email?: string | null;
   role: Role;
   mustChangePwd?: boolean;
   isActive?: boolean;
+}
+
+export interface Invitation {
+  id: number;
+  email: string;
+  fullName: string;
+  role: Role;
+  expiresAt: string;
+  createdAt: string;
+  invitedBy?: { id: number; fullName: string } | null;
 }
 
 export const STAGES = [

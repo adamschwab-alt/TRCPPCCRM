@@ -64,6 +64,8 @@ model User {
   role          Role
   isActive      Boolean   @default(true)
   mustChangePwd Boolean   @default(true)
+  failedLoginAttempts Int  @default(0)
+  lockedUntil   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   isArchived    Boolean   @default(false)
@@ -73,6 +75,33 @@ model User {
   ownedCustomers                 Customer[]    @relation("CustomerOwner")
   notes                          OpportunityNote[]
   goNoGoApprovals                GoNoGoDecisionRecord[] @relation("GoNoGoApprover")
+  invitationsSent                Invitation[]  @relation("InvitedBy")
+}
+
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Invitation {
+  id           Int      @id @default(autoincrement())
+  token        String   @unique
+  email        String
+  fullName     String
+  role         Role
+  invitedById  Int?
+  invitedBy    User?    @relation("InvitedBy", fields: [invitedById], references: [id])
+  acceptedAt   DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([email])
 }
 
 model Customer {

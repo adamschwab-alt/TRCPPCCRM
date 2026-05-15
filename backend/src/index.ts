@@ -2,6 +2,7 @@ import "./util";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import path from "path";
 import fs from "fs";
 import { z } from "zod";
@@ -14,7 +15,21 @@ import {
   signToken,
 } from "./auth";
 import { toCents, nextProjectNumber } from "./util";
-import { PipelineStage } from "@prisma/client";
+import { PipelineStage, Role } from "@prisma/client";
+import { sendEmail, inviteEmail, resetEmail } from "./email";
+
+const MAX_FAILED_LOGINS = 5;
+const LOCKOUT_MIN = 15;
+const RESET_TOKEN_TTL_MIN = 60;
+const INVITE_TTL_DAYS = 7;
+
+async function appBaseUrl(req: express.Request): Promise<string> {
+  const fromSetting = await prisma.setting.findUnique({ where: { key: "app_base_url" } });
+  if (fromSetting?.value) return fromSetting.value;
+  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
 
 const app = express();
 app.use(cors());
@@ -30,15 +45,35 @@ app.post("/api/auth/login", async (req, res) => {
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
-  const { username, password } = parsed.data;
-  const user = await prisma.user.findUnique({
-    where: { username: username.toLowerCase() },
+  const identifier = parsed.data.username.toLowerCase().trim();
+  const password = parsed.data.password;
+
+  // Accept either username or email
+  const user = await prisma.user.findFirst({
+    where: { OR: [{ username: identifier }, { email: identifier }] },
   });
   if (!user || !user.isActive || user.isArchived) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const mins = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+    return res.status(423).json({ error: `Account locked. Try again in ${mins} minute(s).` });
+  }
   const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+  if (!ok) {
+    const attempts = user.failedLoginAttempts + 1;
+    const data: any = { failedLoginAttempts: attempts };
+    if (attempts >= MAX_FAILED_LOGINS) {
+      data.lockedUntil = new Date(Date.now() + LOCKOUT_MIN * 60_000);
+      data.failedLoginAttempts = 0;
+    }
+    await prisma.user.update({ where: { id: user.id }, data });
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { failedLoginAttempts: 0, lockedUntil: null },
+  });
   const token = signToken({
     id: user.id,
     username: user.username,
@@ -51,10 +86,232 @@ app.post("/api/auth/login", async (req, res) => {
       id: user.id,
       username: user.username,
       fullName: user.fullName,
+      email: user.email,
       role: user.role,
       mustChangePwd: user.mustChangePwd,
     },
   });
+});
+
+/* ----- Forgot / reset password ----- */
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const schema = z.object({ email: z.string().email() });
+  const parsed = schema.safeParse(req.body);
+  // Always return ok, even on miss — avoid leaking which emails exist
+  if (!parsed.success) return res.json({ ok: true });
+  const email = parsed.data.email.toLowerCase().trim();
+  const user = await prisma.user.findFirst({ where: { email, isArchived: false, isActive: true } });
+  if (user) {
+    const token = crypto.randomBytes(32).toString("hex");
+    await prisma.passwordResetToken.create({
+      data: {
+        token,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MIN * 60_000),
+      },
+    });
+    const base = await appBaseUrl(req);
+    const msg = resetEmail({ fullName: user.fullName, appUrl: base, token });
+    await sendEmail({ to: email, ...msg });
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const schema = z.object({
+    token: z.string().min(10),
+    newPassword: z.string().min(8),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const rec = await prisma.passwordResetToken.findUnique({ where: { token: parsed.data.token } });
+  if (!rec || rec.usedAt || rec.expiresAt < new Date()) {
+    return res.status(400).json({ error: "Reset link expired or invalid" });
+  }
+  const hash = await bcrypt.hash(parsed.data.newPassword, 10);
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: rec.userId },
+      data: { passwordHash: hash, mustChangePwd: false, failedLoginAttempts: 0, lockedUntil: null },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: rec.id },
+      data: { usedAt: new Date() },
+    }),
+  ]);
+  res.json({ ok: true });
+});
+
+/* ----- Self-service signup (only when allow_self_signup setting is true) ----- */
+app.post("/api/auth/signup", async (req, res) => {
+  const allow = await prisma.setting.findUnique({ where: { key: "allow_self_signup" } });
+  if (allow?.value !== "true") {
+    return res.status(403).json({ error: "Self-signup is disabled. Ask an admin to invite you." });
+  }
+  const schema = z.object({
+    fullName: z.string().min(2),
+    email: z.string().email(),
+    password: z.string().min(8),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const email = parsed.data.email.toLowerCase().trim();
+  const existing = await prisma.user.findFirst({
+    where: { OR: [{ email }, { username: email }] },
+  });
+  if (existing) return res.status(409).json({ error: "An account with that email already exists" });
+  const hash = await bcrypt.hash(parsed.data.password, 10);
+  const user = await prisma.user.create({
+    data: {
+      username: email,
+      fullName: parsed.data.fullName,
+      email,
+      passwordHash: hash,
+      role: "READ_ONLY",
+      mustChangePwd: false,
+    },
+  });
+  const token = signToken({ id: user.id, username: user.username, role: user.role, fullName: user.fullName });
+  res.json({
+    token,
+    user: { id: user.id, username: user.username, fullName: user.fullName, email: user.email, role: user.role, mustChangePwd: false },
+  });
+});
+
+/* ----- Invitations ----- */
+app.post(
+  "/api/invitations",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req: AuthRequest, res) => {
+    const schema = z.object({
+      email: z.string().email(),
+      fullName: z.string().min(2),
+      role: z.enum(["ADMIN", "LEADERSHIP", "ESTIMATOR", "PM", "READ_ONLY"]),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+    const email = parsed.data.email.toLowerCase().trim();
+    const existing = await prisma.user.findFirst({ where: { OR: [{ email }, { username: email }] } });
+    if (existing) return res.status(409).json({ error: "A user with that email already exists" });
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const inv = await prisma.invitation.create({
+      data: {
+        token,
+        email,
+        fullName: parsed.data.fullName,
+        role: parsed.data.role as Role,
+        invitedById: req.user!.id,
+        expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60_000),
+      },
+    });
+    const base = await appBaseUrl(req);
+    const msg = inviteEmail({
+      fullName: parsed.data.fullName,
+      appUrl: base,
+      token,
+      invitedBy: req.user!.fullName,
+    });
+    await sendEmail({ to: email, ...msg });
+    res.json({ id: inv.id, sentTo: email });
+  }
+);
+
+app.get("/api/invitations", authRequired, requireRole("ADMIN"), async (_req, res) => {
+  const rows = await prisma.invitation.findMany({
+    where: { acceptedAt: null, expiresAt: { gte: new Date() } },
+    orderBy: { createdAt: "desc" },
+    include: { invitedBy: { select: { id: true, fullName: true } } },
+  });
+  res.json(rows);
+});
+
+app.delete("/api/invitations/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  await prisma.invitation.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+app.get("/api/invitations/lookup/:token", async (req, res) => {
+  const inv = await prisma.invitation.findUnique({ where: { token: req.params.token } });
+  if (!inv || inv.acceptedAt || inv.expiresAt < new Date()) {
+    return res.status(404).json({ error: "Invitation invalid or expired" });
+  }
+  res.json({ email: inv.email, fullName: inv.fullName, role: inv.role });
+});
+
+app.post("/api/invitations/accept", async (req, res) => {
+  const schema = z.object({
+    token: z.string().min(10),
+    password: z.string().min(8),
+    username: z.string().min(2).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const inv = await prisma.invitation.findUnique({ where: { token: parsed.data.token } });
+  if (!inv || inv.acceptedAt || inv.expiresAt < new Date()) {
+    return res.status(400).json({ error: "Invitation invalid or expired" });
+  }
+  const username = (parsed.data.username || inv.email).toLowerCase().trim();
+  const existing = await prisma.user.findFirst({
+    where: { OR: [{ email: inv.email }, { username }] },
+  });
+  if (existing) return res.status(409).json({ error: "Account already exists for this email" });
+  const hash = await bcrypt.hash(parsed.data.password, 10);
+  const user = await prisma.user.create({
+    data: {
+      username,
+      email: inv.email,
+      fullName: inv.fullName,
+      role: inv.role,
+      passwordHash: hash,
+      mustChangePwd: false,
+    },
+  });
+  await prisma.invitation.update({
+    where: { id: inv.id },
+    data: { acceptedAt: new Date() },
+  });
+  const tok = signToken({
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    fullName: user.fullName,
+  });
+  res.json({
+    token: tok,
+    user: { id: user.id, username: user.username, fullName: user.fullName, email: user.email, role: user.role, mustChangePwd: false },
+  });
+});
+
+/* ----- Self-service profile ----- */
+app.put("/api/auth/profile", authRequired, async (req: AuthRequest, res) => {
+  const schema = z.object({
+    fullName: z.string().min(1).optional(),
+    email: z.string().email().nullable().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const data: any = {};
+  if (parsed.data.fullName !== undefined) data.fullName = parsed.data.fullName;
+  if (parsed.data.email !== undefined) {
+    data.email = parsed.data.email ? parsed.data.email.toLowerCase().trim() : null;
+  }
+  try {
+    const u = await prisma.user.update({ where: { id: req.user!.id }, data });
+    res.json({
+      id: u.id,
+      username: u.username,
+      fullName: u.fullName,
+      email: u.email,
+      role: u.role,
+      mustChangePwd: u.mustChangePwd,
+    });
+  } catch (e: any) {
+    if (e.code === "P2002") return res.status(409).json({ error: "That email is already in use" });
+    throw e;
+  }
 });
 
 app.post("/api/auth/change-password", authRequired, async (req: AuthRequest, res) => {
@@ -83,9 +340,16 @@ app.get("/api/auth/me", authRequired, async (req: AuthRequest, res) => {
     id: u.id,
     username: u.username,
     fullName: u.fullName,
+    email: u.email,
     role: u.role,
     mustChangePwd: u.mustChangePwd,
   });
+});
+
+// Public bootstrap config (anything safe for unauthenticated users)
+app.get("/api/auth/public-config", async (_req, res) => {
+  const s = await prisma.setting.findUnique({ where: { key: "allow_self_signup" } });
+  res.json({ allowSelfSignup: s?.value === "true" });
 });
 
 /* ===================== SETTINGS ===================== */
@@ -172,6 +436,7 @@ app.get("/api/users", authRequired, async (_req, res) => {
       id: true,
       username: true,
       fullName: true,
+      email: true,
       role: true,
       isActive: true,
     },
@@ -187,6 +452,7 @@ app.post(
     const schema = z.object({
       username: z.string().min(2),
       fullName: z.string().min(1),
+      email: z.string().email().nullable().optional(),
       role: z.enum(["ADMIN", "LEADERSHIP", "ESTIMATOR", "PM", "READ_ONLY"]),
       password: z.string().min(8).optional(),
     });
@@ -198,6 +464,7 @@ app.post(
       data: {
         username: parsed.data.username.toLowerCase(),
         fullName: parsed.data.fullName,
+        email: parsed.data.email ? parsed.data.email.toLowerCase().trim() : null,
         role: parsed.data.role,
         passwordHash: hash,
         mustChangePwd: true,

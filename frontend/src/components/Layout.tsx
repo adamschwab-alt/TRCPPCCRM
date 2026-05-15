@@ -78,10 +78,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )}
           </nav>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:block text-right">
-              <div className="text-sm font-semibold">{user?.fullName}</div>
+            <Link to="/profile" className="hidden sm:block text-right group">
+              <div className="text-sm font-semibold group-hover:text-redland-gold">{user?.fullName}</div>
               <div className="text-xs text-white/70">{user?.role}</div>
-            </div>
+            </Link>
+            <Link to="/profile" className="sm:hidden text-white/80 hover:text-white text-sm font-semibold">
+              Account
+            </Link>
             <button onClick={logout} className="text-white/80 hover:text-white text-sm font-semibold">
               Log out
             </button>

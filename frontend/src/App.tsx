@@ -5,6 +5,11 @@ import { SettingsProvider, useSettings } from "./settings";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import AcceptInvite from "./pages/AcceptInvite";
+import Signup from "./pages/Signup";
+import Profile from "./pages/Profile";
 import Dashboard from "./pages/Dashboard";
 import Pipeline from "./pages/Pipeline";
 import OpportunityDetail from "./pages/OpportunityDetail";
@@ -51,7 +56,19 @@ export default function App() {
       <SettingsProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
           <Route path="/change-password" element={<ChangePassword />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password/:token" element={<ResetPassword />} />
+          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+          <Route
+            path="/profile"
+            element={
+              <Protected>
+                <Profile />
+              </Protected>
+            }
+          />
           <Route
             path="/"
             element={
