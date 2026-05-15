@@ -11,6 +11,8 @@ const MODULES: { key: string; label: string; alwaysOn?: boolean }[] = [
   { key: "module_customer_mgmt_enabled", label: "Module 5 · Customer Management" },
   { key: "module_backlog_enabled", label: "Module 6 · Backlog Overview" },
   { key: "module_dashboard_enabled", label: "Module 7 · Reporting Dashboard" },
+  { key: "module_contacts_enabled", label: "Module 8 · Contacts" },
+  { key: "module_compliance_enabled", label: "Module 9 · Compliance Vault" },
 ];
 
 const WEIGHTS = [
@@ -38,9 +40,13 @@ export default function AdminSettings() {
   const [local, setLocal] = useState<Record<string, string>>({});
   const [users, setUsers] = useState<any[]>([]);
   const [savedMsg, setSavedMsg] = useState("");
-  const [tab, setTab] = useState<"modules" | "config" | "users" | "dropdowns" | "audit">("modules");
+  const [tab, setTab] = useState<"modules" | "config" | "users" | "dropdowns" | "audit" | "automation" | "boards">("modules");
   const [auditRows, setAuditRows] = useState<any[]>([]);
   const [auditFilter, setAuditFilter] = useState<string>("");
+  const [rules, setRules] = useState<any[]>([]);
+  const [adminBoards, setAdminBoards] = useState<any[]>([]);
+  const [newRule, setNewRule] = useState<{ name: string; trigger: "STAGE_CHANGED_TO" | "OPPORTUNITY_CREATED"; triggerArg: string; action: "CREATE_NOTE" | "SET_NEXT_ACTION"; body: string; daysFromNow: number; note: string }>({ name: "", trigger: "STAGE_CHANGED_TO", triggerArg: "BID_SUBMITTED", action: "CREATE_NOTE", body: "", daysFromNow: 3, note: "" });
+  const [newBoard, setNewBoard] = useState({ slug: "", name: "", color: "#8B1A1A" });
   const [newUser, setNewUser] = useState({ username: "", fullName: "", email: "", role: "ESTIMATOR" });
   const [newDropdown, setNewDropdown] = useState<Record<string, string>>({});
   const [invitations, setInvitations] = useState<any[]>([]);
@@ -72,7 +78,49 @@ export default function AdminSettings() {
 
   useEffect(() => {
     if (tab === "audit") loadAudit().catch(() => {});
+    if (tab === "automation") api("/api/automation-rules").then(setRules).catch(() => {});
+    if (tab === "boards") api("/api/boards").then(setAdminBoards).catch(() => {});
   }, [tab, auditFilter]);
+
+  async function addRule() {
+    if (!newRule.name) return;
+    const actionArgs: any = {};
+    if (newRule.action === "CREATE_NOTE") actionArgs.body = newRule.body;
+    if (newRule.action === "SET_NEXT_ACTION") { actionArgs.daysFromNow = newRule.daysFromNow; actionArgs.note = newRule.note; }
+    await api("/api/automation-rules", {
+      method: "POST",
+      body: JSON.stringify({
+        name: newRule.name,
+        trigger: newRule.trigger,
+        triggerArg: newRule.triggerArg,
+        action: newRule.action,
+        actionArgs,
+        enabled: true,
+      }),
+    });
+    setNewRule({ name: "", trigger: "STAGE_CHANGED_TO", triggerArg: "BID_SUBMITTED", action: "CREATE_NOTE", body: "", daysFromNow: 3, note: "" });
+    setRules(await api("/api/automation-rules"));
+  }
+  async function toggleRule(id: number, enabled: boolean) {
+    await api(`/api/automation-rules/${id}`, { method: "PUT", body: JSON.stringify({ enabled }) });
+    setRules(await api("/api/automation-rules"));
+  }
+  async function deleteRule(id: number) {
+    if (!confirm("Delete this rule?")) return;
+    await api(`/api/automation-rules/${id}`, { method: "DELETE" });
+    setRules(await api("/api/automation-rules"));
+  }
+  async function addBoard() {
+    if (!newBoard.slug || !newBoard.name) return;
+    await api("/api/boards", { method: "POST", body: JSON.stringify(newBoard) });
+    setNewBoard({ slug: "", name: "", color: "#8B1A1A" });
+    setAdminBoards(await api("/api/boards"));
+  }
+  async function deleteBoard(id: number) {
+    if (!confirm("Archive this board? Opportunities on it will remain.")) return;
+    await api(`/api/boards/${id}`, { method: "DELETE" });
+    setAdminBoards(await api("/api/boards"));
+  }
 
   if (user?.role !== "ADMIN" && user?.role !== "LEADERSHIP") {
     return <div className="card p-6">You don't have access to this page.</div>;
@@ -152,7 +200,7 @@ export default function AdminSettings() {
       <h1 className="text-2xl font-extrabold text-redland-charcoal">Admin Settings</h1>
 
       <div className="border-b flex flex-wrap gap-1">
-        {(["modules", "config", "users", "dropdowns", "audit"] as const).map((t) => (
+        {(["modules", "config", "boards", "automation", "users", "dropdowns", "audit"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -160,7 +208,7 @@ export default function AdminSettings() {
               tab === t ? "bg-redland-charcoal text-white" : "text-gray-700 hover:bg-gray-100"
             }`}
           >
-            {t === "modules" ? "Modules" : t === "config" ? "Configuration" : t === "users" ? "Users" : t === "dropdowns" ? "Dropdowns" : "Audit Log"}
+            {t === "modules" ? "Modules" : t === "config" ? "Configuration" : t === "users" ? "Users" : t === "dropdowns" ? "Dropdowns" : t === "audit" ? "Audit Log" : t === "automation" ? "Automation" : "Boards"}
           </button>
         ))}
       </div>
@@ -514,6 +562,127 @@ export default function AdminSettings() {
                     <td colSpan={6} className="text-center text-gray-500 py-6">No audit events match.</td>
                   </tr>
                 )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "boards" && (
+        <div className="space-y-3">
+          <div className="card p-4 space-y-3">
+            <div className="font-bold text-redland-charcoal">Pipeline boards</div>
+            <p className="text-xs text-gray-600">Create separate pipeline boards for different sales motions (Public/DOT, Private Repeat, Negotiated/Last-Look). Bids can be moved between boards from the Pipeline → Bulk-edit bar.</p>
+            <div className="grid sm:grid-cols-4 gap-2">
+              <input className="input" placeholder="slug (a-z, _, -)" value={newBoard.slug} onChange={(e) => setNewBoard({ ...newBoard, slug: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })} />
+              <input className="input" placeholder="Display name" value={newBoard.name} onChange={(e) => setNewBoard({ ...newBoard, name: e.target.value })} />
+              <input className="input" type="color" value={newBoard.color} onChange={(e) => setNewBoard({ ...newBoard, color: e.target.value })} />
+              <button onClick={addBoard} className="btn-primary">Add board</button>
+            </div>
+          </div>
+          <div className="card overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-redland-charcoal text-white">
+                <tr><th className="px-3 py-2 text-left">Slug</th><th className="px-3 py-2 text-left">Name</th><th className="px-3 py-2 text-left">Color</th><th className="px-3 py-2 text-right"></th></tr>
+              </thead>
+              <tbody>
+                {adminBoards.map((b) => (
+                  <tr key={b.id} className="border-t">
+                    <td className="px-3 py-2 font-mono">{b.slug}</td>
+                    <td className="px-3 py-2 font-semibold">{b.name}</td>
+                    <td className="px-3 py-2"><span className="inline-block w-6 h-4 rounded" style={{ background: b.color }} /> {b.color}</td>
+                    <td className="px-3 py-2 text-right">
+                      {b.slug !== "main" && <button onClick={() => deleteBoard(b.id)} className="text-red-700 text-xs font-semibold hover:underline">Archive</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "automation" && (
+        <div className="space-y-3">
+          <div className="card p-4 space-y-3">
+            <div className="font-bold text-redland-charcoal">New automation rule</div>
+            <p className="text-xs text-gray-600">When a trigger fires, run the chosen action. Use <code className="bg-gray-100 px-1">{"{customer}"}</code> in templates to substitute the customer name.</p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Rule name</label>
+                <input className="input" value={newRule.name} onChange={(e) => setNewRule({ ...newRule, name: e.target.value })} placeholder="e.g. Day 7 follow-up reminder" />
+              </div>
+              <div>
+                <label className="label">Trigger</label>
+                <select className="input" value={newRule.trigger} onChange={(e) => setNewRule({ ...newRule, trigger: e.target.value as any })}>
+                  <option value="STAGE_CHANGED_TO">Stage changed to…</option>
+                  <option value="OPPORTUNITY_CREATED">Opportunity created</option>
+                </select>
+              </div>
+              {newRule.trigger === "STAGE_CHANGED_TO" && (
+                <div>
+                  <label className="label">Stage</label>
+                  <select className="input" value={newRule.triggerArg} onChange={(e) => setNewRule({ ...newRule, triggerArg: e.target.value })}>
+                    {["LEAD", "REVIEWING_ITB", "GO_NO_GO", "ESTIMATING", "BID_SUBMITTED", "AWAITING_DECISION", "WON", "LOST", "NO_BID", "WITHDRAWN"].map((s) => (
+                      <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="label">Action</label>
+                <select className="input" value={newRule.action} onChange={(e) => setNewRule({ ...newRule, action: e.target.value as any })}>
+                  <option value="CREATE_NOTE">Create a note</option>
+                  <option value="SET_NEXT_ACTION">Set next action</option>
+                </select>
+              </div>
+              {newRule.action === "CREATE_NOTE" && (
+                <div className="sm:col-span-2">
+                  <label className="label">Note body</label>
+                  <textarea className="input" rows={2} value={newRule.body} onChange={(e) => setNewRule({ ...newRule, body: e.target.value })} placeholder="e.g. Reminder: follow up with {customer} on bid status." />
+                </div>
+              )}
+              {newRule.action === "SET_NEXT_ACTION" && (
+                <>
+                  <div>
+                    <label className="label">Days from now</label>
+                    <input type="number" min={0} className="input" value={newRule.daysFromNow} onChange={(e) => setNewRule({ ...newRule, daysFromNow: Number(e.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="label">Action note</label>
+                    <input className="input" value={newRule.note} onChange={(e) => setNewRule({ ...newRule, note: e.target.value })} placeholder="e.g. Call to check status" />
+                  </div>
+                </>
+              )}
+            </div>
+            <button onClick={addRule} className="btn-primary">Add rule</button>
+          </div>
+          <div className="card overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-redland-charcoal text-white">
+                <tr>
+                  <th className="px-3 py-2 text-left">Rule</th>
+                  <th className="px-3 py-2 text-left">When</th>
+                  <th className="px-3 py-2 text-left">Then</th>
+                  <th className="px-3 py-2 text-center">Enabled</th>
+                  <th className="px-3 py-2 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="px-3 py-2 font-semibold">{r.name}</td>
+                    <td className="px-3 py-2 text-xs">{r.trigger}{r.triggerArg ? `: ${r.triggerArg.replace(/_/g, " ")}` : ""}</td>
+                    <td className="px-3 py-2 text-xs">{r.action} <span className="text-gray-500">{r.actionArgs}</span></td>
+                    <td className="px-3 py-2 text-center">
+                      <input type="checkbox" className="accent-redland-red" checked={r.enabled} onChange={(e) => toggleRule(r.id, e.target.checked)} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => deleteRule(r.id)} className="text-red-700 text-xs font-semibold hover:underline">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+                {rules.length === 0 && <tr><td colSpan={5} className="text-center text-gray-500 py-6">No automation rules yet.</td></tr>}
               </tbody>
             </table>
           </div>

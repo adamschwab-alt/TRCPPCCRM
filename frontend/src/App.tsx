@@ -17,6 +17,8 @@ import OpportunityDetail from "./pages/OpportunityDetail";
 import BidAnalytics from "./pages/BidAnalytics";
 import EstimatorWorkload from "./pages/EstimatorWorkload";
 import Customers from "./pages/Customers";
+import Contacts from "./pages/Contacts";
+import Compliance from "./pages/Compliance";
 import Backlog from "./pages/Backlog";
 import AdminSettings from "./pages/AdminSettings";
 
@@ -130,6 +132,26 @@ export default function App() {
               <Protected>
                 <ModuleGate mod="customer_mgmt">
                   <Customers />
+                </ModuleGate>
+              </Protected>
+            }
+          />
+          <Route
+            path="/contacts"
+            element={
+              <Protected>
+                <ModuleGate mod="contacts">
+                  <Contacts />
+                </ModuleGate>
+              </Protected>
+            }
+          />
+          <Route
+            path="/compliance"
+            element={
+              <Protected>
+                <ModuleGate mod="compliance">
+                  <Compliance />
                 </ModuleGate>
               </Protected>
             }

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { api, fmtDate, fmtMoney } from "../api";
+import { Link } from "react-router-dom";
+import { api, fmtDate, fmtDateTime, fmtMoney } from "../api";
 import { useAuth } from "../auth";
 import Modal from "../components/Modal";
 import { Customer } from "../types";
@@ -19,6 +20,7 @@ export default function Customers() {
   const [tierFilter, setTierFilter] = useState("");
   const [adding, setAdding] = useState<Customer | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
   const readOnly = user?.role === "READ_ONLY";
 
   async function load() {
@@ -116,9 +118,11 @@ export default function Customers() {
             {filtered.map((c) => {
               const concentration = totalRevenue ? (Number(c.totalRevenueCents) / totalRevenue) * 100 : 0;
               return (
-                <tr key={c.id} className="border-t">
+                <tr key={c.id} className="border-t hover:bg-gray-50">
                   <td className="px-3 py-2 font-semibold">
-                    {c.companyName}
+                    <button onClick={() => setDetailCustomer(c)} className="text-redland-red hover:underline text-left">
+                      {c.companyName}
+                    </button>
                     {c.lastLook && <span className="ml-2 badge bg-redland-gold text-redland-charcoal">Last Look</span>}
                   </td>
                   <td className="px-3 py-2">{c.customerType.replace("_", " ")}</td>
@@ -153,6 +157,10 @@ export default function Customers() {
           </tbody>
         </table>
       </div>
+
+      <Modal open={!!detailCustomer} onClose={() => setDetailCustomer(null)} title={detailCustomer?.companyName || ""} size="lg">
+        {detailCustomer && <CustomerDetail customer={detailCustomer} />}
+      </Modal>
 
       <Modal open={showAdd || !!adding} onClose={() => { setShowAdd(false); setAdding(null); }} title={adding ? "Edit Customer" : "New Customer"} size="md">
         <CustomerForm
@@ -261,5 +269,78 @@ function CustomerForm({
         <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
       </div>
     </form>
+  );
+}
+
+function CustomerDetail({ customer }: { customer: Customer }) {
+  const [summary, setSummary] = useState<any>(null);
+  const [touchpoints, setTouchpoints] = useState<any>(null);
+
+  useEffect(() => {
+    api(`/api/customers/${customer.id}/summary`).then(setSummary).catch(() => {});
+    api(`/api/customers/${customer.id}/touchpoints`).then(setTouchpoints).catch(() => {});
+  }, [customer.id]);
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-3 bg-redland-gold/10 border-redland-gold/40">
+        <div className="text-xs uppercase font-semibold text-gray-500 mb-1">Smart summary</div>
+        <div className="text-sm">{summary?.summary || "Loading…"}</div>
+      </div>
+
+      {summary && (
+        <div className="grid sm:grid-cols-4 gap-2 text-center">
+          <Box label="Total bids" value={String(summary.counts.total)} />
+          <Box label="Won / Decided" value={`${summary.counts.won} / ${summary.counts.won + summary.counts.lost}`} />
+          <Box label="Open pursuits" value={`${summary.counts.open}`} sub={fmtMoney(summary.openPipelineCents)} />
+          <Box label="Lifetime won" value={fmtMoney(summary.wonRevenueCents)} />
+        </div>
+      )}
+
+      {touchpoints && touchpoints.summary.length > 0 && (
+        <div>
+          <div className="font-bold text-redland-charcoal mb-2">Who knows who (last 24 mo)</div>
+          <div className="space-y-1">
+            {touchpoints.summary.map((a: any) => (
+              <div key={a.id} className="flex items-center justify-between text-sm bg-gray-50 rounded p-2">
+                <div>
+                  <span className="font-semibold">{a.fullName}</span>
+                  <span className="ml-2 text-xs text-gray-500">{a.role}</span>
+                </div>
+                <div className="text-xs text-gray-600">
+                  {a.count} touchpoint{a.count === 1 ? "" : "s"} · last {fmtDate(a.lastAt)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {touchpoints && touchpoints.recentNotes.length > 0 && (
+        <div>
+          <div className="font-bold text-redland-charcoal mb-2">Recent notes</div>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {touchpoints.recentNotes.map((n: any) => (
+              <div key={n.id} className="border-l-2 border-redland-red pl-2 text-sm">
+                <div>{n.body}</div>
+                <div className="text-xs text-gray-500">
+                  {n.author?.fullName} · {fmtDateTime(n.createdAt)} · <Link to={`/opportunities/${n.opportunityId}`} className="text-redland-red hover:underline">{n.opportunityName}</Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Box({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-gray-50 rounded p-2">
+      <div className="text-[0.65rem] text-gray-500 uppercase font-semibold">{label}</div>
+      <div className="text-lg font-extrabold text-redland-red">{value}</div>
+      {sub && <div className="text-xs text-gray-500">{sub}</div>}
+    </div>
   );
 }

@@ -99,6 +99,8 @@ export interface Opportunity {
   goNoGoProjectScore?: number | null;
   goNoGoCompetitionScore?: number | null;
   goNoGoDecisionBand?: string | null;
+  pwin?: number | null;
+  pipelineBoard?: string;
   backlogStatus: "ACTIVE" | "COMPLETE" | "ON_HOLD" | "CANCELLED";
   stageChangedAt: string;
   lastActivityAt?: string;

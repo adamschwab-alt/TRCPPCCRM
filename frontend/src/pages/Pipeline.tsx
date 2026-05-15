@@ -8,8 +8,10 @@ import OpportunityForm from "../components/OpportunityForm";
 import StageChangePrompt from "../components/StageChangePrompt";
 import { isRotting, hasNoNextAction, nextActionStatus, daysSince, rottingDays } from "../hygiene";
 import BidCalendar from "../components/BidCalendar";
+import SavedViews from "../components/SavedViews";
+import RegionMap from "../components/RegionMap";
 
-type View = "kanban" | "list" | "calendar";
+type View = "kanban" | "list" | "calendar" | "map";
 
 export default function Pipeline() {
   const { dropdowns, settings } = useSettings();
@@ -26,9 +28,13 @@ export default function Pipeline() {
   const [customerTypeFilter, setCustomerTypeFilter] = useState("");
   const [bondingFilter, setBondingFilter] = useState("");
   const [users, setUsers] = useState<any[]>([]);
+  const [boards, setBoards] = useState<any[]>([]);
+  const [boardFilter, setBoardFilter] = useState<string>("");
   const [showAdd, setShowAdd] = useState(false);
   const [stagePrompt, setStagePrompt] = useState<{ op: Opportunity; stage: Stage } | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -50,6 +56,7 @@ export default function Pipeline() {
   useEffect(() => {
     load();
     api("/api/users").then(setUsers).catch(() => {});
+    api("/api/boards").then(setBoards).catch(() => {});
   }, []);
 
   const filtered = useMemo(() => {
@@ -71,9 +78,10 @@ export default function Pipeline() {
       if (bondingFilter && String(o.bondingRequired) !== bondingFilter) return false;
       if (hygieneFilter === "stale" && !isRotting(o, settings)) return false;
       if (hygieneFilter === "needs_action" && !hasNoNextAction(o)) return false;
+      if (boardFilter && (o.pipelineBoard || "main") !== boardFilter) return false;
       return true;
     });
-  }, [ops, search, stageFilter, regionFilter, estimatorFilter, projectTypeFilter, customerTypeFilter, bondingFilter, hygieneFilter, settings]);
+  }, [ops, search, stageFilter, regionFilter, estimatorFilter, projectTypeFilter, customerTypeFilter, bondingFilter, hygieneFilter, boardFilter, settings]);
 
   const staleCount = useMemo(() => ops.filter((o) => isRotting(o, settings)).length, [ops, settings]);
   const needsActionCount = useMemo(() => ops.filter(hasNoNextAction).length, [ops]);
@@ -94,6 +102,23 @@ export default function Pipeline() {
     }
     return t;
   }, [ops]);
+
+  async function bulkAction(args: { stage?: Stage; estimatorId?: number | null; pipelineBoard?: string; archive?: boolean }) {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    try {
+      await api("/api/opportunities/bulk-update", {
+        method: "POST",
+        body: JSON.stringify({ ids: Array.from(selected), ...args }),
+      });
+      setSelected(new Set());
+      await load();
+    } catch (e: any) {
+      alert(e.message || "Bulk update failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function changeStage(o: Opportunity, stage: Stage) {
     if (stage === o.stage) return;
@@ -184,6 +209,14 @@ export default function Pipeline() {
             >
               Calendar
             </button>
+            <button
+              onClick={() => setView("map")}
+              className={`px-3 py-2 text-sm font-semibold ${
+                view === "map" ? "bg-redland-charcoal text-white" : "text-redland-charcoal"
+              }`}
+            >
+              Map
+            </button>
           </div>
           <button onClick={exportCSV} className="btn-ghost">
             Export CSV
@@ -193,6 +226,53 @@ export default function Pipeline() {
           </button>
         </div>
       </div>
+
+      {/* Saved views tab strip */}
+      <SavedViews
+        currentFilters={{ search, stageFilter, regionFilter, estimatorFilter, projectTypeFilter, customerTypeFilter, bondingFilter, hygieneFilter, boardFilter }}
+        activeFiltersDescribe=""
+        onApply={(f) => {
+          setSearch(f.search || "");
+          setStageFilter(f.stageFilter || "");
+          setRegionFilter(f.regionFilter || "");
+          setEstimatorFilter(f.estimatorFilter || "");
+          setProjectTypeFilter(f.projectTypeFilter || "");
+          setCustomerTypeFilter(f.customerTypeFilter || "");
+          setBondingFilter(f.bondingFilter || "");
+          setHygieneFilter(f.hygieneFilter || "");
+          setBoardFilter(f.boardFilter || "");
+        }}
+      />
+
+      {/* Board selector */}
+      {boards.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            onClick={() => setBoardFilter("")}
+            className={`px-2.5 py-1 rounded text-xs font-semibold border ${
+              boardFilter === ""
+                ? "bg-redland-charcoal text-white border-redland-charcoal"
+                : "bg-white border-gray-300 hover:border-redland-charcoal"
+            }`}
+          >
+            All boards
+          </button>
+          {boards.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => setBoardFilter(b.slug)}
+              className={`px-2.5 py-1 rounded text-xs font-semibold border ${
+                boardFilter === b.slug
+                  ? "text-white border-transparent"
+                  : "bg-white border-gray-300 hover:opacity-90"
+              }`}
+              style={boardFilter === b.slug ? { backgroundColor: b.color } : {}}
+            >
+              {b.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Summary bar */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-2">
@@ -325,6 +405,8 @@ export default function Pipeline() {
         <div className="text-gray-500">Loading pipeline…</div>
       ) : view === "calendar" ? (
         <BidCalendar opportunities={filtered} />
+      ) : view === "map" ? (
+        <RegionMap opportunities={filtered} />
       ) : view === "kanban" ? (
         <div className="grid grid-flow-col auto-cols-[minmax(260px,1fr)] gap-3 overflow-x-auto pb-2">
           {STAGES.map((s) => (
@@ -413,6 +495,7 @@ export default function Pipeline() {
           <table className="min-w-full text-sm">
             <thead className="bg-redland-charcoal text-white">
               <tr>
+                <th className="px-2 py-2"><input type="checkbox" className="accent-redland-gold" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => { if (e.target.checked) setSelected(new Set(filtered.map((o) => o.id))); else setSelected(new Set()); }} /></th>
                 <th className="px-3 py-2 text-left">Project #</th>
                 <th className="px-3 py-2 text-left">Project Name</th>
                 <th className="px-3 py-2 text-left">Customer</th>
@@ -427,9 +510,12 @@ export default function Pipeline() {
               {filtered.map((o) => (
                 <tr
                   key={o.id}
-                  className="border-t hover:bg-redland-gray cursor-pointer"
+                  className={`border-t hover:bg-redland-gray cursor-pointer ${selected.has(o.id) ? "bg-redland-gold/10" : ""}`}
                   onClick={() => nav(`/opportunities/${o.id}`)}
                 >
+                  <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" className="accent-redland-red" checked={selected.has(o.id)} onChange={(e) => { const next = new Set(selected); if (e.target.checked) next.add(o.id); else next.delete(o.id); setSelected(next); }} />
+                  </td>
                   <td className="px-3 py-2 font-mono text-xs">{o.projectNumber}</td>
                   <td className="px-3 py-2 font-semibold">{o.projectName}</td>
                   <td className="px-3 py-2">{o.customerName}</td>
@@ -457,13 +543,59 @@ export default function Pipeline() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="text-center text-gray-500 py-6">
+                  <td colSpan={9} className="text-center text-gray-500 py-6">
                     No opportunities match.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {selected.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-redland-charcoal text-white shadow-2xl rounded-lg px-4 py-3 flex flex-wrap items-center gap-3 max-w-[95vw]">
+          <span className="font-bold text-sm">{selected.size} selected</span>
+          <select
+            disabled={bulkBusy}
+            className="bg-white text-redland-charcoal text-sm rounded px-2 py-1"
+            value=""
+            onChange={(e) => { if (e.target.value) bulkAction({ stage: e.target.value as Stage }); }}
+          >
+            <option value="">Change stage…</option>
+            {STAGES.map((s) => (<option key={s} value={s}>{STAGE_LABEL[s]}</option>))}
+          </select>
+          <select
+            disabled={bulkBusy}
+            className="bg-white text-redland-charcoal text-sm rounded px-2 py-1"
+            value=""
+            onChange={(e) => { if (e.target.value !== "") bulkAction({ estimatorId: e.target.value === "null" ? null : Number(e.target.value) }); }}
+          >
+            <option value="">Reassign estimator…</option>
+            <option value="null">Unassigned</option>
+            {users.filter((u) => u.role === "ESTIMATOR" || u.role === "ADMIN").map((u) => (
+              <option key={u.id} value={u.id}>{u.fullName}</option>
+            ))}
+          </select>
+          {boards.length > 1 && (
+            <select
+              disabled={bulkBusy}
+              className="bg-white text-redland-charcoal text-sm rounded px-2 py-1"
+              value=""
+              onChange={(e) => { if (e.target.value) bulkAction({ pipelineBoard: e.target.value }); }}
+            >
+              <option value="">Move to board…</option>
+              {boards.map((b) => (<option key={b.id} value={b.slug}>{b.name}</option>))}
+            </select>
+          )}
+          <button
+            onClick={() => { if (confirm(`Archive ${selected.size} bid(s)?`)) bulkAction({ archive: true }); }}
+            disabled={bulkBusy}
+            className="bg-red-700 text-white text-sm rounded px-3 py-1 hover:bg-red-800"
+          >
+            Archive
+          </button>
+          <button onClick={() => setSelected(new Set())} className="text-white/70 hover:text-white text-sm">Clear</button>
         </div>
       )}
 

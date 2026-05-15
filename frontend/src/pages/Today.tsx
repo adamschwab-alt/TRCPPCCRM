@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../api";
 import { useAuth } from "../auth";
-import { STAGE_COLOR, STAGE_LABEL, Stage } from "../types";
+import { STAGE_COLOR, STAGE_LABEL, Stage, Opportunity } from "../types";
 
 interface TodayData {
   tasksDueToday: any[];
@@ -29,14 +29,64 @@ export default function Today() {
   const { user } = useAuth();
   const [data, setData] = useState<TodayData | null>(null);
   const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [allOps, setAllOps] = useState<Opportunity[]>([]);
+  const [queueIdx, setQueueIdx] = useState<number | null>(null);
+  const nav = useNavigate();
 
   async function load() {
-    const d = await api<TodayData>(`/api/dashboard/today?scope=${scope}`);
+    const [d, o] = await Promise.all([
+      api<TodayData>(`/api/dashboard/today?scope=${scope}`),
+      api<Opportunity[]>("/api/opportunities"),
+    ]);
     setData(d);
+    setAllOps(o);
   }
   useEffect(() => {
     load();
   }, [scope]);
+
+  // PWIN-weighted pipeline ($ × p_win) — Vantagepoint pattern
+  const weightedPipeline = useMemo(() => {
+    let raw = 0;
+    let weighted = 0;
+    for (const o of allOps) {
+      if (["WON", "LOST", "NO_BID", "WITHDRAWN"].includes(o.stage)) continue;
+      const v = Number(o.estimatedValueCents);
+      raw += v;
+      const pwin = o.pwin != null ? o.pwin : defaultStagePwin(o.stage);
+      weighted += v * pwin;
+    }
+    return { raw, weighted };
+  }, [allOps]);
+
+  // Task queue — flatten suggestions + tasks into an ordered work list
+  const queue = useMemo(() => {
+    if (!data) return [] as { id: number; projectName: string; reason: string }[];
+    const ids = new Set<number>();
+    const items: { id: number; projectName: string; reason: string }[] = [];
+    function push(id: number, projectName: string, reason: string) {
+      if (ids.has(id)) return;
+      ids.add(id);
+      items.push({ id, projectName, reason });
+    }
+    for (const t of data.tasksOverdue) push(t.id, t.projectName, `Overdue: ${t.nextActionNote || "next action"}`);
+    for (const t of data.tasksDueToday) push(t.id, t.projectName, `Due today: ${t.nextActionNote || "next action"}`);
+    for (const s of data.suggestions) push(s.opportunityId, s.projectName, s.message);
+    return items;
+  }, [data]);
+
+  function startQueue() {
+    if (queue.length === 0) return;
+    setQueueIdx(0);
+    nav(`/opportunities/${queue[0].id}`);
+  }
+  function nextInQueue() {
+    if (queueIdx === null) return;
+    const next = queueIdx + 1;
+    if (next >= queue.length) { setQueueIdx(null); nav("/"); return; }
+    setQueueIdx(next);
+    nav(`/opportunities/${queue[next].id}`);
+  }
 
   if (!data) return <div className="text-gray-500">Loading…</div>;
 
@@ -79,6 +129,42 @@ export default function Today() {
         <Stat label="Stale deals" value={data.staleCount} accent={data.staleCount > 0 ? "bg-yellow-100 text-yellow-800" : "bg-gray-100 text-gray-700"} />
         <Stat label="Overdue bids" value={data.overdueBidCount} accent={data.overdueBidCount > 0 ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-700"} />
       </div>
+
+      {(user?.role === "LEADERSHIP" || user?.role === "ADMIN") && (
+        <div className="card p-4 grid sm:grid-cols-3 gap-4 items-center">
+          <div>
+            <div className="text-xs text-gray-500 uppercase font-semibold">Raw pipeline</div>
+            <div className="text-2xl font-extrabold text-redland-charcoal">{fmtMoney(weightedPipeline.raw)}</div>
+            <div className="text-xs text-gray-500">all open bids · estimated value</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 uppercase font-semibold">PWIN-weighted</div>
+            <div className="text-2xl font-extrabold text-redland-red">{fmtMoney(weightedPipeline.weighted)}</div>
+            <div className="text-xs text-gray-500">$ × probability of win</div>
+          </div>
+          <div className="text-xs text-gray-600">
+            Weighted pipeline applies each bid's Go/No-Go probability (or stage default when unscored). Use it instead of raw pipeline for forecasting.
+          </div>
+        </div>
+      )}
+
+      {queue.length > 0 && (
+        <div className="card p-3 flex flex-wrap items-center gap-2 bg-redland-gold/10 border-redland-gold/40">
+          <div className="flex-1">
+            <div className="font-bold text-redland-charcoal text-sm">Follow-up queue</div>
+            <div className="text-xs text-gray-600">Walk through all {queue.length} item{queue.length === 1 ? "" : "s"} that need your attention, one at a time.</div>
+          </div>
+          {queueIdx !== null ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-600">{queueIdx + 1} / {queue.length}</span>
+              <button onClick={nextInQueue} className="btn-primary text-xs">Next →</button>
+              <button onClick={() => { setQueueIdx(null); nav("/"); }} className="btn-ghost text-xs">Exit queue</button>
+            </div>
+          ) : (
+            <button onClick={startQueue} className="btn-gold">Start follow-up queue →</button>
+          )}
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="card p-4">
@@ -155,6 +241,21 @@ export default function Today() {
       </div>
     </div>
   );
+}
+
+// Stage-based PWIN fallback when no Go/No-Go has been scored yet — rough
+// industry priors. Used only when opportunity.pwin is null.
+function defaultStagePwin(stage: Stage): number {
+  switch (stage) {
+    case "LEAD": return 0.10;
+    case "REVIEWING_ITB": return 0.20;
+    case "GO_NO_GO": return 0.30;
+    case "ESTIMATING": return 0.40;
+    case "BID_SUBMITTED": return 0.45;
+    case "AWAITING_DECISION": return 0.50;
+    case "WON": return 1.0;
+    default: return 0;
+  }
 }
 
 function Stat({ label, value, accent }: { label: string; value: number; accent: string }) {

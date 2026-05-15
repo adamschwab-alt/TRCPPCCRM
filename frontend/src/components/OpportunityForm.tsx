@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { useSettings } from "../settings";
 import { Opportunity, STAGES, STAGE_LABEL } from "../types";
+import { clearDraft, loadDraft, useAutosave } from "../draft";
 
 interface Props {
   initial?: Partial<Opportunity>;
@@ -18,8 +19,11 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
   const [error, setError] = useState("");
 
   const defaultMargin = parseFloat(settings.default_bid_margin_pct || "6");
+  const draftKey = `opportunity-form:${initial?.id ?? "new"}`;
+  const draft = loadDraft<any>(draftKey);
+  const [restoredDraft, setRestoredDraft] = useState<boolean>(!!draft);
 
-  const [f, setF] = useState({
+  const [f, setF] = useState(draft ?? {
     projectName: initial?.projectName || "",
     customerName: initial?.customerName || "",
     customerType: initial?.customerType || "GC",
@@ -46,7 +50,13 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
     lastLook: initial?.lastLook || false,
     nextActionDate: initial?.nextActionDate ? initial.nextActionDate.substring(0, 10) : "",
     nextActionNote: initial?.nextActionNote || "",
+    pipelineBoard: initial?.pipelineBoard || "main",
   });
+
+  const [boards, setBoards] = useState<any[]>([]);
+  useEffect(() => { api("/api/boards").then(setBoards).catch(() => {}); }, []);
+
+  useAutosave(draftKey, f);
 
   useEffect(() => {
     api("/api/users").then(setUsers).catch(() => {});
@@ -58,7 +68,7 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
 
   function toggleScope(s: string) {
     const exists = f.scopeOfWork.includes(s);
-    set("scopeOfWork", exists ? f.scopeOfWork.filter((x) => x !== s) : [...f.scopeOfWork, s]);
+    set("scopeOfWork", exists ? f.scopeOfWork.filter((x: string) => x !== s) : [...f.scopeOfWork, s]);
   }
 
   async function submit(e: React.FormEvent) {
@@ -102,6 +112,7 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
         lastLook: f.lastLook,
         nextActionDate: f.nextActionDate || null,
         nextActionNote: f.nextActionNote || null,
+        pipelineBoard: f.pipelineBoard || "main",
       };
       const isEdit = !!initial?.id;
       const res = await api<Opportunity>(
@@ -111,6 +122,7 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
           body: JSON.stringify(payload),
         }
       );
+      clearDraft(draftKey);
       onSaved(res);
     } catch (err: any) {
       setError(err.message || "Save failed");
@@ -119,11 +131,28 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
     }
   }
 
+  function cancelWithDraftClear() {
+    clearDraft(draftKey);
+    onCancel();
+  }
+
   return (
     <form onSubmit={submit} className="space-y-4">
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-800 text-sm rounded p-2">
           {error}
+        </div>
+      )}
+      {restoredDraft && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded p-2 flex items-center justify-between">
+          <span>📝 Restored unsaved draft from your last session.</span>
+          <button
+            type="button"
+            onClick={() => { clearDraft(draftKey); setRestoredDraft(false); window.location.reload(); }}
+            className="text-blue-700 font-semibold hover:underline"
+          >
+            Discard
+          </button>
         </div>
       )}
 
@@ -337,6 +366,14 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
               ))}
             </select>
           </div>
+          {boards.length > 1 && (
+            <div>
+              <label className="label">Pipeline board</label>
+              <select className="input" value={f.pipelineBoard} onChange={(e) => set("pipelineBoard", e.target.value)}>
+                {boards.map((b) => (<option key={b.id} value={b.slug}>{b.name}</option>))}
+              </select>
+            </div>
+          )}
           <div className="sm:col-span-2">
             <label className="label">Scope of Work</label>
             <div className="flex flex-wrap gap-2">
@@ -410,7 +447,7 @@ export default function OpportunityForm({ initial, onSaved, onCancel, quickAdd }
       )}
 
       <div className="flex items-center justify-end gap-2 pt-2 border-t">
-        <button type="button" onClick={onCancel} className="btn-ghost">
+        <button type="button" onClick={cancelWithDraftClear} className="btn-ghost">
           Cancel
         </button>
         <button type="submit" disabled={saving} className="btn-primary disabled:opacity-50">

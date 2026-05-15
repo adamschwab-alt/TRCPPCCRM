@@ -93,6 +93,8 @@ const SETTINGS: Record<string, string> = {
   module_estimator_workload_enabled: "true",
   module_customer_mgmt_enabled: "true",
   module_backlog_enabled: "true",
+  module_contacts_enabled: "true",
+  module_compliance_enabled: "true",
   estimator_capacity_threshold: "5",
   default_bid_margin_pct: "6",
   go_no_go_threshold_david: "5000000",
