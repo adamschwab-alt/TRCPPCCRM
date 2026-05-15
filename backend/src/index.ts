@@ -20,6 +20,8 @@ import { sendEmail, inviteEmail, resetEmail } from "./email";
 import { validatePassword } from "./policy";
 import { audit } from "./audit";
 import { generateSecret, provisioningQR, verifyTotp } from "./totp";
+import { previewHeavyBidImport, commitHeavyBidImport, previewSage300Import, commitSage300Import } from "./integrations";
+import { streamWorkbook, streamCSV } from "./exports";
 
 const MAX_FAILED_LOGINS = 5;
 const LOCKOUT_MIN = 15;
@@ -36,7 +38,7 @@ async function appBaseUrl(req: express.Request): Promise<string> {
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "25mb" }));
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -2125,6 +2127,310 @@ app.get("/api/customers/:id/touchpoints", authRequired, async (req, res) => {
       opportunityName: n.opportunity.projectName,
     })),
   });
+});
+
+/* ===================== INTEGRATIONS — HeavyBid + Sage 300 ===================== */
+app.post("/api/integrations/heavybid/preview", authRequired, requireRole("ADMIN", "LEADERSHIP", "ESTIMATOR"), async (req, res) => {
+  const { csv } = req.body as { csv: string };
+  if (!csv) return res.status(400).json({ error: "Provide csv body" });
+  const result = await previewHeavyBidImport(csv);
+  res.json(result);
+});
+
+app.post("/api/integrations/heavybid/import", authRequired, requireRole("ADMIN", "LEADERSHIP", "ESTIMATOR"), async (req: AuthRequest, res) => {
+  const { csv, fileName } = req.body as { csv: string; fileName?: string };
+  if (!csv) return res.status(400).json({ error: "Provide csv body" });
+  const result = await commitHeavyBidImport(csv, req.user!.id, fileName);
+  await audit({ event: "settings.updated", userId: req.user!.id, actorLabel: req.user!.username, req, meta: { kind: "heavybid_import", ...result } });
+  res.json(result);
+});
+
+app.post("/api/integrations/sage300/preview", authRequired, requireRole("ADMIN", "LEADERSHIP"), async (req, res) => {
+  const { csv } = req.body as { csv: string };
+  if (!csv) return res.status(400).json({ error: "Provide csv body" });
+  const result = await previewSage300Import(csv);
+  res.json(result);
+});
+
+app.post("/api/integrations/sage300/import", authRequired, requireRole("ADMIN", "LEADERSHIP"), async (req: AuthRequest, res) => {
+  const { csv, fileName } = req.body as { csv: string; fileName?: string };
+  if (!csv) return res.status(400).json({ error: "Provide csv body" });
+  const result = await commitSage300Import(csv, req.user!.id, fileName);
+  await audit({ event: "settings.updated", userId: req.user!.id, actorLabel: req.user!.username, req, meta: { kind: "sage300_import", ...result } });
+  res.json(result);
+});
+
+app.get("/api/integrations/imports", authRequired, async (_req, res) => {
+  const rows = await prisma.integrationImport.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  res.json(rows);
+});
+
+/* ===================== EXCEL / CSV EXPORTS ===================== */
+// Pipeline (xlsx)
+app.get("/api/exports/pipeline.xlsx", authRequired, async (_req, res) => {
+  const ops = await prisma.opportunity.findMany({
+    where: { isArchived: false },
+    orderBy: { createdAt: "desc" },
+    include: {
+      estimator: { select: { fullName: true } },
+      pm: { select: { fullName: true } },
+    },
+  });
+  await streamWorkbook(res, "redland-pipeline", [{
+    name: "Pipeline",
+    cols: [
+      { header: "Project #", key: "projectNumber", width: 18 },
+      { header: "Project Name", key: "projectName", width: 35 },
+      { header: "Customer", key: "customerName", width: 28 },
+      { header: "Stage", key: "stage", width: 16 },
+      { header: "Board", key: "pipelineBoard", width: 14 },
+      { header: "Estimated Value", key: "estimatedValue", width: 18, format: "money" },
+      { header: "Actual Value", key: "actualValue", width: 18, format: "money" },
+      { header: "Bid Margin %", key: "bidMarginPct", width: 12 },
+      { header: "PWIN", key: "pwin", width: 8, format: "pct" },
+      { header: "G/N/G Score", key: "goNoGoScore", width: 12 },
+      { header: "Decision Band", key: "goNoGoDecisionBand", width: 18 },
+      { header: "Region", key: "region", width: 16 },
+      { header: "Project Type", key: "projectType", width: 16 },
+      { header: "Customer Type", key: "customerType", width: 14 },
+      { header: "Estimator", key: "estimator", width: 22 },
+      { header: "PM", key: "pm", width: 22 },
+      { header: "Bid Due", key: "bidDueDate", width: 14, format: "date" },
+      { header: "Est. Start", key: "estimatedStartDate", width: 14, format: "date" },
+      { header: "Source", key: "source", width: 18 },
+      { header: "Bonding", key: "bondingRequired", width: 10 },
+      { header: "Last Look", key: "lastLook", width: 10 },
+      { header: "Last Activity", key: "lastActivityAt", width: 18, format: "datetime" },
+      { header: "Next Action Date", key: "nextActionDate", width: 14, format: "date" },
+      { header: "Next Action", key: "nextActionNote", width: 36 },
+      { header: "HeavyBid Job #", key: "heavyBidJobNumber", width: 14 },
+      { header: "Sage Job #", key: "sage300JobNumber", width: 14 },
+      { header: "Cost to Date", key: "costToDate", width: 18, format: "money" },
+      { header: "Billed to Date", key: "billedToDate", width: 18, format: "money" },
+      { header: "% Complete", key: "percentComplete", width: 12 },
+      { header: "Actual Margin %", key: "actualMarginPct", width: 14 },
+    ],
+    rows: ops.map((o) => ({
+      projectNumber: o.projectNumber,
+      projectName: o.projectName,
+      customerName: o.customerName,
+      stage: o.stage.replace(/_/g, " "),
+      pipelineBoard: o.pipelineBoard,
+      estimatedValue: o.estimatedValueCents,
+      actualValue: o.actualValueCents,
+      bidMarginPct: o.bidMarginPct,
+      pwin: o.pwin != null ? o.pwin * 100 : null,
+      goNoGoScore: o.goNoGoScore,
+      goNoGoDecisionBand: o.goNoGoDecisionBand,
+      region: o.region,
+      projectType: o.projectType,
+      customerType: o.customerType,
+      estimator: o.estimator?.fullName,
+      pm: o.pm?.fullName,
+      bidDueDate: o.bidDueDate,
+      estimatedStartDate: o.estimatedStartDate,
+      source: o.source,
+      bondingRequired: o.bondingRequired ? "Yes" : "No",
+      lastLook: o.lastLook ? "Yes" : "No",
+      lastActivityAt: o.lastActivityAt,
+      nextActionDate: o.nextActionDate,
+      nextActionNote: o.nextActionNote,
+      heavyBidJobNumber: o.heavyBidJobNumber,
+      sage300JobNumber: o.sage300JobNumber,
+      costToDate: o.costToDateCents,
+      billedToDate: o.billedToDateCents,
+      percentComplete: o.percentComplete,
+      actualMarginPct: o.actualMarginPct,
+    })),
+  }]);
+});
+
+// Customers
+app.get("/api/exports/customers.xlsx", authRequired, async (_req, res) => {
+  const rows = await prisma.customer.findMany({
+    where: { isArchived: false },
+    orderBy: { companyName: "asc" },
+    include: { owner: { select: { fullName: true } } },
+  });
+  await streamWorkbook(res, "redland-customers", [{
+    name: "Customers",
+    cols: [
+      { header: "Company", key: "companyName", width: 32 },
+      { header: "Primary Contact", key: "primaryContact", width: 22 },
+      { header: "Email", key: "email", width: 26 },
+      { header: "Phone", key: "phone", width: 16 },
+      { header: "Type", key: "customerType", width: 14 },
+      { header: "Tier", key: "tier", width: 12 },
+      { header: "Last Look", key: "lastLook", width: 10 },
+      { header: "Owner", key: "owner", width: 22 },
+      { header: "Notes", key: "notes", width: 40 },
+    ],
+    rows: rows.map((c) => ({ ...c, owner: c.owner?.fullName, lastLook: c.lastLook ? "Yes" : "No" })),
+  }]);
+});
+
+// Backlog (Won projects + actuals)
+app.get("/api/exports/backlog.xlsx", authRequired, async (_req, res) => {
+  const ops = await prisma.opportunity.findMany({
+    where: { isArchived: false, stage: "WON" },
+    orderBy: { decidedAt: "desc" },
+    include: { pm: { select: { fullName: true } } },
+  });
+  await streamWorkbook(res, "redland-backlog", [{
+    name: "Backlog",
+    cols: [
+      { header: "Project #", key: "projectNumber", width: 18 },
+      { header: "Project Name", key: "projectName", width: 35 },
+      { header: "Customer", key: "customerName", width: 28 },
+      { header: "Contract", key: "contract", width: 18, format: "money" },
+      { header: "PM", key: "pm", width: 22 },
+      { header: "Start", key: "estimatedStartDate", width: 14, format: "date" },
+      { header: "Duration (mo)", key: "estimatedDurationMonths", width: 14 },
+      { header: "Status", key: "backlogStatus", width: 14 },
+      { header: "Sage Job #", key: "sage300JobNumber", width: 14 },
+      { header: "Cost to Date", key: "costToDate", width: 18, format: "money" },
+      { header: "Billed to Date", key: "billedToDate", width: 18, format: "money" },
+      { header: "% Complete", key: "percentComplete", width: 12 },
+      { header: "Expected Margin %", key: "expectedMarginPct", width: 16 },
+      { header: "Actual Margin %", key: "actualMarginPct", width: 14 },
+      { header: "Actuals As Of", key: "actualsAsOf", width: 14, format: "date" },
+    ],
+    rows: ops.map((o) => ({
+      ...o,
+      contract: o.actualValueCents ?? o.estimatedValueCents,
+      pm: o.pm?.fullName,
+      costToDate: o.costToDateCents,
+      billedToDate: o.billedToDateCents,
+    })),
+  }]);
+});
+
+// Audit log
+app.get("/api/exports/audit-log.xlsx", authRequired, requireRole("ADMIN", "LEADERSHIP"), async (_req, res) => {
+  const rows = await prisma.auditLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 5000,
+    include: { user: { select: { fullName: true, username: true } } },
+  });
+  await streamWorkbook(res, "redland-audit-log", [{
+    name: "Audit Log",
+    cols: [
+      { header: "When", key: "createdAt", width: 20, format: "datetime" },
+      { header: "Event", key: "event", width: 28 },
+      { header: "Actor", key: "actor", width: 24 },
+      { header: "Username", key: "username", width: 18 },
+      { header: "Target", key: "target", width: 18 },
+      { header: "IP", key: "ip", width: 16 },
+      { header: "User Agent", key: "userAgent", width: 50 },
+      { header: "Detail", key: "meta", width: 50 },
+    ],
+    rows: rows.map((r) => ({
+      createdAt: r.createdAt,
+      event: r.event,
+      actor: r.user?.fullName || r.actorLabel,
+      username: r.user?.username,
+      target: r.targetType ? `${r.targetType}#${r.targetId}` : "",
+      ip: r.ip,
+      userAgent: r.userAgent,
+      meta: r.meta ? JSON.stringify(r.meta) : "",
+    })),
+  }]);
+});
+
+// Compliance
+app.get("/api/exports/compliance.xlsx", authRequired, async (_req, res) => {
+  const rows = await prisma.complianceDoc.findMany({
+    where: { isArchived: false },
+    orderBy: { expiresAt: "asc" },
+    include: { customer: { select: { companyName: true } } },
+  });
+  await streamWorkbook(res, "redland-compliance", [{
+    name: "Compliance",
+    cols: [
+      { header: "Type", key: "docType", width: 12 },
+      { header: "Label", key: "label", width: 30 },
+      { header: "Customer", key: "customer", width: 30 },
+      { header: "Expires", key: "expiresAt", width: 14, format: "date" },
+      { header: "Notes", key: "notes", width: 40 },
+    ],
+    rows: rows.map((r) => ({ ...r, customer: r.customer?.companyName })),
+  }]);
+});
+
+// Contacts
+app.get("/api/exports/contacts.xlsx", authRequired, async (_req, res) => {
+  const rows = await prisma.contact.findMany({
+    where: { isArchived: false },
+    orderBy: { fullName: "asc" },
+    include: { currentCustomer: { select: { companyName: true } }, employmentHistory: { orderBy: { startedAt: "desc" } } },
+  });
+  await streamWorkbook(res, "redland-contacts", [
+    {
+      name: "Contacts",
+      cols: [
+        { header: "Name", key: "fullName", width: 24 },
+        { header: "Title", key: "title", width: 22 },
+        { header: "Current Employer", key: "employer", width: 28 },
+        { header: "Email", key: "email", width: 26 },
+        { header: "Phone", key: "phone", width: 16 },
+        { header: "Notes", key: "notes", width: 40 },
+      ],
+      rows: rows.map((c) => ({ ...c, employer: c.currentCustomer?.companyName })),
+    },
+    {
+      name: "Employment History",
+      cols: [
+        { header: "Contact", key: "contact", width: 24 },
+        { header: "Employer", key: "customerName", width: 28 },
+        { header: "Title", key: "title", width: 22 },
+        { header: "Started", key: "startedAt", width: 14, format: "date" },
+        { header: "Ended", key: "endedAt", width: 14, format: "date" },
+      ],
+      rows: rows.flatMap((c) => c.employmentHistory.map((e) => ({ ...e, contact: c.fullName }))),
+    },
+  ]);
+});
+
+// HeavyBid-shaped CSV export for round-tripping (uses HeavyBid column headers
+// so the file can be re-imported into HeavyBid Pre-Construction module).
+app.get("/api/exports/heavybid.csv", authRequired, async (_req, res) => {
+  const ops = await prisma.opportunity.findMany({
+    where: { isArchived: false },
+    orderBy: { createdAt: "desc" },
+    include: { estimator: { select: { fullName: true } } },
+  });
+  const headers = ["Job Number", "Project Name", "Owner", "Bid Total", "Bid Due", "Estimator", "Status", "Region"];
+  const rows = ops.map((o) => [
+    o.heavyBidJobNumber || o.projectNumber,
+    o.projectName,
+    o.customerName,
+    Number(o.estimatedValueCents) / 100,
+    o.bidDueDate ? o.bidDueDate.toISOString().slice(0, 10) : "",
+    o.estimator?.fullName || "",
+    o.stage.replace(/_/g, " "),
+    o.region,
+  ]);
+  streamCSV(res, "redland-heavybid", headers, rows);
+});
+
+// Sage 300-shaped CSV (Won opps only) — for pushing wins into Sage as Jobs.
+app.get("/api/exports/sage300.csv", authRequired, async (_req, res) => {
+  const ops = await prisma.opportunity.findMany({
+    where: { isArchived: false, stage: "WON" },
+    orderBy: { decidedAt: "desc" },
+  });
+  const headers = ["Job", "Job Name", "Customer", "Contract Amount", "Status"];
+  const rows = ops.map((o) => [
+    o.sage300JobNumber || o.projectNumber,
+    o.projectName,
+    o.customerName,
+    Number(o.actualValueCents ?? o.estimatedValueCents) / 100,
+    o.backlogStatus === "ACTIVE" ? "Active" : o.backlogStatus === "COMPLETE" ? "Complete" : o.backlogStatus === "ON_HOLD" ? "On Hold" : "Cancelled",
+  ]);
+  streamCSV(res, "redland-sage300", headers, rows);
 });
 
 /* ===================== STATIC SPA (production) ===================== */

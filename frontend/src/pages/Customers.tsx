@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, fmtDate, fmtDateTime, fmtMoney } from "../api";
 import { useAuth } from "../auth";
 import Modal from "../components/Modal";
+import ExportButton from "../components/ExportButton";
 import { Customer } from "../types";
 
 const TIERS = ["PLATINUM", "GOLD", "SILVER", "NEW"] as const;
@@ -55,11 +56,14 @@ export default function Customers() {
           <h1 className="text-2xl font-extrabold text-redland-charcoal">Customers</h1>
           <p className="text-sm text-gray-600">Relationship tiers and customer-level analytics</p>
         </div>
-        {!readOnly && (
-          <button onClick={() => setShowAdd(true)} className="btn-gold">
-            + New Customer
-          </button>
-        )}
+        <div className="flex gap-2">
+          <ExportButton path="/api/exports/customers.xlsx" />
+          {!readOnly && (
+            <button onClick={() => setShowAdd(true)} className="btn-gold">
+              + New Customer
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid sm:grid-cols-3 gap-4">

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtMoney } from "../api";
 import { useAuth } from "../auth";
+import ExportButton from "../components/ExportButton";
 import { Opportunity } from "../types";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -52,9 +53,12 @@ export default function Backlog() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-extrabold text-redland-charcoal">Backlog Overview</h1>
-        <p className="text-sm text-gray-600">Read-only summary of all Won opportunities</p>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-extrabold text-redland-charcoal">Backlog Overview</h1>
+          <p className="text-sm text-gray-600">Won projects · Sage 300 actuals when integrated</p>
+        </div>
+        <ExportButton path="/api/exports/backlog.xlsx" />
       </div>
 
       <div className="grid sm:grid-cols-3 gap-4">
@@ -92,6 +96,8 @@ export default function Backlog() {
               <th className="px-3 py-2 text-left">PM</th>
               <th className="px-3 py-2 text-left">Start</th>
               <th className="px-3 py-2 text-left">Duration</th>
+              <th className="px-3 py-2 text-right">% Done</th>
+              <th className="px-3 py-2 text-right">Actual Margin</th>
               <th className="px-3 py-2 text-left">Status</th>
             </tr>
           </thead>
@@ -110,6 +116,8 @@ export default function Backlog() {
                 <td className="px-3 py-2">{o.pm?.fullName || "—"}</td>
                 <td className="px-3 py-2">{fmtDate(o.estimatedStartDate)}</td>
                 <td className="px-3 py-2">{o.estimatedDurationMonths ? `${o.estimatedDurationMonths} mo` : "—"}</td>
+                <td className="px-3 py-2 text-right">{(o as any).percentComplete != null ? `${(o as any).percentComplete}%` : "—"}</td>
+                <td className="px-3 py-2 text-right">{(o as any).actualMarginPct != null ? `${Number((o as any).actualMarginPct).toFixed(1)}%` : "—"}</td>
                 <td className="px-3 py-2">
                   {readOnly ? (
                     <span className={`badge ${STATUS_COLOR[o.backlogStatus]}`}>{o.backlogStatus}</span>
@@ -130,7 +138,7 @@ export default function Backlog() {
             ))}
             {ops.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center text-gray-500 py-6">
+                <td colSpan={10} className="text-center text-gray-500 py-6">
                   No won projects yet.
                 </td>
               </tr>

@@ -20,6 +20,7 @@ import Customers from "./pages/Customers";
 import Contacts from "./pages/Contacts";
 import Compliance from "./pages/Compliance";
 import Backlog from "./pages/Backlog";
+import Integrations from "./pages/Integrations";
 import AdminSettings from "./pages/AdminSettings";
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -162,6 +163,16 @@ export default function App() {
               <Protected>
                 <ModuleGate mod="backlog">
                   <Backlog />
+                </ModuleGate>
+              </Protected>
+            }
+          />
+          <Route
+            path="/integrations"
+            element={
+              <Protected>
+                <ModuleGate mod="integrations">
+                  <Integrations />
                 </ModuleGate>
               </Protected>
             }

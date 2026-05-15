@@ -188,6 +188,13 @@ model Opportunity {
   goNoGoCompetitionScore Float?
   goNoGoDecisionBand    String?
   pwin                  Float?
+  heavyBidJobNumber     String?
+  sage300JobNumber      String?
+  costToDateCents       BigInt?
+  billedToDateCents     BigInt?
+  percentComplete       Float?
+  actualMarginPct       Float?
+  actualsAsOf           DateTime?
   backlogStatus         BacklogStatus  @default(ACTIVE)
   stageChangedAt        DateTime       @default(now())
   bidSubmittedAt        DateTime?
@@ -373,4 +380,21 @@ model IntegrationLog {
   payload   String?
   status    String?
   createdAt DateTime @default(now())
+}
+
+model IntegrationImport {
+  id          Int      @id @default(autoincrement())
+  source      String   // HEAVYBID | SAGE300
+  fileName    String?
+  importedBy  Int?
+  rowCount    Int      @default(0)
+  createdCount Int     @default(0)
+  updatedCount Int     @default(0)
+  skippedCount Int     @default(0)
+  errorCount  Int      @default(0)
+  errorsJson  String?
+  createdAt   DateTime @default(now())
+
+  @@index([source])
+  @@index([createdAt])
 }

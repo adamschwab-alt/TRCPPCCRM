@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api, fmtDate } from "../api";
 import { useAuth } from "../auth";
 import Modal from "../components/Modal";
+import ExportButton from "../components/ExportButton";
 
 export default function Contacts() {
   const { user } = useAuth();
@@ -29,7 +30,10 @@ export default function Contacts() {
           <h1 className="text-2xl font-extrabold text-redland-charcoal">Contacts</h1>
           <p className="text-sm text-gray-600">People we deal with. Employment history is preserved when contacts move between companies.</p>
         </div>
-        {!readOnly && <button onClick={() => setShowAdd(true)} className="btn-gold">+ New Contact</button>}
+        <div className="flex gap-2">
+          <ExportButton path="/api/exports/contacts.xlsx" />
+          {!readOnly && <button onClick={() => setShowAdd(true)} className="btn-gold">+ New Contact</button>}
+        </div>
       </div>
 
       <input

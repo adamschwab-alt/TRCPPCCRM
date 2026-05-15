@@ -191,6 +191,13 @@ export default function OpportunityDetail() {
             )}
             <Field label="Competitive" value={op.competitive ? "Yes" : "Negotiated"} />
             <Field label="Last Look" value={op.lastLook ? "Yes" : "No"} />
+            {(op as any).heavyBidJobNumber && <Field label="HeavyBid Job #" value={(op as any).heavyBidJobNumber} />}
+            {(op as any).sage300JobNumber && <Field label="Sage Job #" value={(op as any).sage300JobNumber} />}
+            {(op as any).costToDateCents != null && <Field label="Cost to Date" value={fmtMoney((op as any).costToDateCents)} />}
+            {(op as any).billedToDateCents != null && <Field label="Billed to Date" value={fmtMoney((op as any).billedToDateCents)} />}
+            {(op as any).percentComplete != null && <Field label="% Complete" value={`${(op as any).percentComplete}%`} />}
+            {(op as any).actualMarginPct != null && <Field label="Actual Margin" value={`${Number((op as any).actualMarginPct).toFixed(1)}%`} />}
+            {(op as any).actualsAsOf && <Field label="Actuals As Of" value={fmtDate((op as any).actualsAsOf)} />}
             {op.stage === "WON" && (
               <>
                 <Field label="Actual Value" value={fmtMoney(op.actualValueCents ?? null)} />

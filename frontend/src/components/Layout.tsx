@@ -19,6 +19,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { to: "/contacts", label: "Contacts", show: enabled("contacts") },
     { to: "/compliance", label: "Compliance", show: enabled("compliance") },
     { to: "/backlog", label: "Backlog", show: enabled("backlog") },
+    { to: "/integrations", label: "Integrations", show: enabled("integrations") },
   ];
   const isAdmin = user?.role === "ADMIN" || user?.role === "LEADERSHIP";
 

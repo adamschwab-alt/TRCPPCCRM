@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { useSettings } from "../settings";
+import ExportButton from "../components/ExportButton";
 
 const MODULES: { key: string; label: string; alwaysOn?: boolean }[] = [
   { key: "module_pipeline_enabled", label: "Module 1 · Pipeline (always on)", alwaysOn: true },
@@ -13,6 +14,7 @@ const MODULES: { key: string; label: string; alwaysOn?: boolean }[] = [
   { key: "module_dashboard_enabled", label: "Module 7 · Reporting Dashboard" },
   { key: "module_contacts_enabled", label: "Module 8 · Contacts" },
   { key: "module_compliance_enabled", label: "Module 9 · Compliance Vault" },
+  { key: "module_integrations_enabled", label: "Module 10 · Integrations & Exports" },
 ];
 
 const WEIGHTS = [
@@ -529,6 +531,7 @@ export default function AdminSettings() {
               <option value="profile.updated">Profile updated</option>
             </select>
             <button onClick={loadAudit} className="btn-ghost">Refresh</button>
+            <ExportButton path="/api/exports/audit-log.xlsx" label="Export Excel" />
           </div>
           <div className="card overflow-x-auto">
             <table className="min-w-full text-sm">

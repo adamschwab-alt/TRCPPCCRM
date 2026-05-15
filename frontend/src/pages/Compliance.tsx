@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api, fmtDate } from "../api";
 import { useAuth } from "../auth";
 import Modal from "../components/Modal";
+import ExportButton from "../components/ExportButton";
 
 const TYPES = ["COI", "W9", "LICENSE", "MBE", "WBE", "DBE", "OTHER"] as const;
 const TYPE_LABEL: Record<string, string> = {
@@ -70,9 +71,12 @@ export default function Compliance() {
           <h1 className="text-2xl font-extrabold text-redland-charcoal">Compliance Vault</h1>
           <p className="text-sm text-gray-600">COIs, W-9s, licenses, MBE/WBE/DBE certifications — track expirations.</p>
         </div>
-        {!readOnly && (
-          <button onClick={() => setShowAdd(true)} className="btn-gold">+ New Document</button>
-        )}
+        <div className="flex gap-2">
+          <ExportButton path="/api/exports/compliance.xlsx" />
+          {!readOnly && (
+            <button onClick={() => setShowAdd(true)} className="btn-gold">+ New Document</button>
+          )}
+        </div>
       </div>
 
       <div className="grid sm:grid-cols-3 gap-3">

@@ -10,6 +10,7 @@ import { isRotting, hasNoNextAction, nextActionStatus, daysSince, rottingDays } 
 import BidCalendar from "../components/BidCalendar";
 import SavedViews from "../components/SavedViews";
 import RegionMap from "../components/RegionMap";
+import ExportButton from "../components/ExportButton";
 
 type View = "kanban" | "list" | "calendar" | "map";
 
@@ -218,9 +219,8 @@ export default function Pipeline() {
               Map
             </button>
           </div>
-          <button onClick={exportCSV} className="btn-ghost">
-            Export CSV
-          </button>
+          <button onClick={exportCSV} className="btn-ghost">⬇ Export CSV</button>
+          <ExportButton path="/api/exports/pipeline.xlsx" label="Export Excel" />
           <button onClick={() => setShowAdd(true)} className="btn-gold text-base py-2.5 px-5 shadow-sm">
             + New Opportunity
           </button>
