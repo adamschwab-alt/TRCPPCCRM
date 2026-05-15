@@ -38,7 +38,9 @@ export default function AdminSettings() {
   const [local, setLocal] = useState<Record<string, string>>({});
   const [users, setUsers] = useState<any[]>([]);
   const [savedMsg, setSavedMsg] = useState("");
-  const [tab, setTab] = useState<"modules" | "config" | "users" | "dropdowns">("modules");
+  const [tab, setTab] = useState<"modules" | "config" | "users" | "dropdowns" | "audit">("modules");
+  const [auditRows, setAuditRows] = useState<any[]>([]);
+  const [auditFilter, setAuditFilter] = useState<string>("");
   const [newUser, setNewUser] = useState({ username: "", fullName: "", email: "", role: "ESTIMATOR" });
   const [newDropdown, setNewDropdown] = useState<Record<string, string>>({});
   const [invitations, setInvitations] = useState<any[]>([]);
@@ -58,10 +60,19 @@ export default function AdminSettings() {
       setInvitations(await api("/api/invitations"));
     } catch {}
   }
+  async function loadAudit() {
+    const qs = auditFilter ? `?event=${encodeURIComponent(auditFilter)}` : "";
+    setAuditRows(await api(`/api/audit-log${qs}`));
+  }
+
   useEffect(() => {
     loadUsers();
     loadInvitations();
   }, [user?.role]);
+
+  useEffect(() => {
+    if (tab === "audit") loadAudit().catch(() => {});
+  }, [tab, auditFilter]);
 
   if (user?.role !== "ADMIN" && user?.role !== "LEADERSHIP") {
     return <div className="card p-6">You don't have access to this page.</div>;
@@ -141,7 +152,7 @@ export default function AdminSettings() {
       <h1 className="text-2xl font-extrabold text-redland-charcoal">Admin Settings</h1>
 
       <div className="border-b flex flex-wrap gap-1">
-        {(["modules", "config", "users", "dropdowns"] as const).map((t) => (
+        {(["modules", "config", "users", "dropdowns", "audit"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -149,7 +160,7 @@ export default function AdminSettings() {
               tab === t ? "bg-redland-charcoal text-white" : "text-gray-700 hover:bg-gray-100"
             }`}
           >
-            {t === "modules" ? "Modules" : t === "config" ? "Configuration" : t === "users" ? "Users" : "Dropdowns"}
+            {t === "modules" ? "Modules" : t === "config" ? "Configuration" : t === "users" ? "Users" : t === "dropdowns" ? "Dropdowns" : "Audit Log"}
           </button>
         ))}
       </div>
@@ -233,6 +244,36 @@ export default function AdminSettings() {
                 onChange={(e) => set("app_base_url", e.target.value)}
               />
               <p className="text-xs text-gray-500 mt-1">Leave blank to auto-detect from request headers (works for most hosts).</p>
+            </div>
+            <div className="flex items-center justify-between py-2 border-t">
+              <div>
+                <div className="font-semibold">Require 2FA for Admin accounts</div>
+                <div className="text-xs text-gray-500">When on, every admin must enroll in two-factor authentication before they can access the app.</div>
+              </div>
+              <button
+                onClick={() => set("require_2fa_admin", local.require_2fa_admin === "true" ? "false" : "true")}
+                className={`relative w-12 h-6 rounded-full transition-colors ${local.require_2fa_admin === "true" ? "bg-redland-red" : "bg-gray-300"}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${local.require_2fa_admin === "true" ? "translate-x-6" : ""}`} />
+              </button>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3 pt-2 border-t">
+              <div>
+                <label className="label">Minimum password length</label>
+                <input type="number" min={8} className="input" value={local.password_min_length || ""} onChange={(e) => set("password_min_length", e.target.value)} />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-sm">Require mixed characters</div>
+                  <div className="text-xs text-gray-500">Need 3 of: lowercase, uppercase, digit, symbol.</div>
+                </div>
+                <button
+                  onClick={() => set("password_require_mixed", local.password_require_mixed === "true" ? "false" : "true")}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${local.password_require_mixed === "true" ? "bg-redland-red" : "bg-gray-300"}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${local.password_require_mixed === "true" ? "translate-x-6" : ""}`} />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -376,6 +417,70 @@ export default function AdminSettings() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === "audit" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="input max-w-xs" value={auditFilter} onChange={(e) => setAuditFilter(e.target.value)}>
+              <option value="">All events</option>
+              <option value="login.success">Successful logins</option>
+              <option value="login.failed">Failed logins</option>
+              <option value="login.locked">Account lockouts</option>
+              <option value="password.changed">Password changes</option>
+              <option value="password.reset.requested">Password reset requested</option>
+              <option value="password.reset.completed">Password reset completed</option>
+              <option value="2fa.enrolled">2FA enrolled</option>
+              <option value="2fa.disabled">2FA disabled</option>
+              <option value="user.created">User created</option>
+              <option value="user.role_changed">Role changed</option>
+              <option value="user.deactivated">User deactivated</option>
+              <option value="user.password_reset_by_admin">Admin reset password</option>
+              <option value="invitation.sent">Invitation sent</option>
+              <option value="invitation.accepted">Invitation accepted</option>
+              <option value="invitation.revoked">Invitation revoked</option>
+              <option value="logout.all">Logout-all</option>
+              <option value="settings.updated">Settings updated</option>
+              <option value="profile.updated">Profile updated</option>
+            </select>
+            <button onClick={loadAudit} className="btn-ghost">Refresh</button>
+          </div>
+          <div className="card overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-redland-charcoal text-white">
+                <tr>
+                  <th className="px-3 py-2 text-left">When</th>
+                  <th className="px-3 py-2 text-left">Event</th>
+                  <th className="px-3 py-2 text-left">Actor</th>
+                  <th className="px-3 py-2 text-left">Target</th>
+                  <th className="px-3 py-2 text-left">IP</th>
+                  <th className="px-3 py-2 text-left">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditRows.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-600">{new Date(r.createdAt).toLocaleString()}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{r.event}</td>
+                    <td className="px-3 py-2">{r.user?.fullName || r.actorLabel || "—"}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.targetType ? `${r.targetType}#${r.targetId}` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{r.ip || "—"}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500">
+                      {r.meta ? <code className="text-[0.65rem]">{JSON.stringify(r.meta)}</code> : "—"}
+                    </td>
+                  </tr>
+                ))}
+                {auditRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="text-center text-gray-500 py-6">No audit events match.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

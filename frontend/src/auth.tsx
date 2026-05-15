@@ -1,11 +1,16 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { api, setToken } from "./api";
+import { api, ApiError, setToken } from "./api";
 import { User } from "./types";
+
+interface LoginResult {
+  user?: User;
+  needsTotp?: boolean;
+}
 
 interface AuthCtx {
   user: User | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<User>;
+  login: (username: string, password: string, totpCode?: string) => Promise<LoginResult>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -34,14 +39,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh().finally(() => setLoading(false));
   }, []);
 
-  async function login(username: string, password: string) {
-    const res = await api<{ token: string; user: User }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    });
-    setToken(res.token);
-    setUser(res.user);
-    return res.user;
+  async function login(username: string, password: string, totpCode?: string): Promise<LoginResult> {
+    try {
+      const res = await api<{ token: string; user: User } | { needsTotp: true }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password, totpCode }),
+      });
+      if ((res as any).needsTotp) {
+        return { needsTotp: true };
+      }
+      const ok = res as { token: string; user: User };
+      setToken(ok.token);
+      setUser(ok.user);
+      return { user: ok.user };
+    } catch (e: any) {
+      // 206 (needs TOTP) comes through API client as success, but if the host
+      // returns it as an error, surface the flag here too.
+      if (e instanceof ApiError && e.body?.needsTotp) return { needsTotp: true };
+      throw e;
+    }
   }
 
   function logout() {

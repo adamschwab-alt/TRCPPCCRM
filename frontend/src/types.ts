@@ -7,6 +7,8 @@ export interface User {
   email?: string | null;
   role: Role;
   mustChangePwd?: boolean;
+  totpEnabled?: boolean;
+  must2faEnroll?: boolean;
   isActive?: boolean;
 }
 

@@ -106,6 +106,9 @@ const SETTINGS: Record<string, string> = {
   weight_strategic: "10",
   allow_self_signup: "false",
   app_base_url: "",
+  require_2fa_admin: "false",
+  password_min_length: "8",
+  password_require_mixed: "false",
 };
 
 async function main() {

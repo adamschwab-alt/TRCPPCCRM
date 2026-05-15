@@ -17,6 +17,9 @@ import {
 import { toCents, nextProjectNumber } from "./util";
 import { PipelineStage, Role } from "@prisma/client";
 import { sendEmail, inviteEmail, resetEmail } from "./email";
+import { validatePassword } from "./policy";
+import { audit } from "./audit";
+import { generateSecret, provisioningQR, verifyTotp } from "./totp";
 
 const MAX_FAILED_LOGINS = 5;
 const LOCKOUT_MIN = 15;
@@ -42,17 +45,18 @@ app.post("/api/auth/login", async (req, res) => {
   const schema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),
+    totpCode: z.string().optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
   const identifier = parsed.data.username.toLowerCase().trim();
   const password = parsed.data.password;
 
-  // Accept either username or email
   const user = await prisma.user.findFirst({
     where: { OR: [{ username: identifier }, { email: identifier }] },
   });
   if (!user || !user.isActive || user.isArchived) {
+    await audit({ event: "login.failed", actorLabel: identifier, req });
     return res.status(401).json({ error: "Invalid credentials" });
   }
   if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -66,10 +70,29 @@ app.post("/api/auth/login", async (req, res) => {
     if (attempts >= MAX_FAILED_LOGINS) {
       data.lockedUntil = new Date(Date.now() + LOCKOUT_MIN * 60_000);
       data.failedLoginAttempts = 0;
+      await prisma.user.update({ where: { id: user.id }, data });
+      await audit({ event: "login.locked", userId: user.id, actorLabel: user.username, req });
+      return res.status(401).json({ error: "Invalid credentials" });
     }
     await prisma.user.update({ where: { id: user.id }, data });
+    await audit({ event: "login.failed", userId: user.id, actorLabel: user.username, req });
     return res.status(401).json({ error: "Invalid credentials" });
   }
+
+  // Require 2FA if user has it enabled, or if admin-2FA enforcement is on.
+  const require2faAdminRow = await prisma.setting.findUnique({ where: { key: "require_2fa_admin" } });
+  const adminMustEnroll = require2faAdminRow?.value === "true" && user.role === "ADMIN" && !user.totpEnabled;
+
+  if (user.totpEnabled) {
+    if (!parsed.data.totpCode) {
+      return res.status(206).json({ needsTotp: true });
+    }
+    if (!user.totpSecret || !(await verifyTotp(parsed.data.totpCode, user.totpSecret))) {
+      await audit({ event: "login.failed", userId: user.id, actorLabel: user.username, req, meta: { reason: "bad_totp" } });
+      return res.status(401).json({ error: "Invalid verification code" });
+    }
+  }
+
   await prisma.user.update({
     where: { id: user.id },
     data: { failedLoginAttempts: 0, lockedUntil: null },
@@ -79,7 +102,9 @@ app.post("/api/auth/login", async (req, res) => {
     username: user.username,
     role: user.role,
     fullName: user.fullName,
+    tokenVersion: user.tokenVersion,
   });
+  await audit({ event: "login.success", userId: user.id, actorLabel: user.username, req });
   res.json({
     token,
     user: {
@@ -89,6 +114,8 @@ app.post("/api/auth/login", async (req, res) => {
       email: user.email,
       role: user.role,
       mustChangePwd: user.mustChangePwd,
+      totpEnabled: user.totpEnabled,
+      must2faEnroll: adminMustEnroll,
     },
   });
 });
@@ -113,6 +140,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     const base = await appBaseUrl(req);
     const msg = resetEmail({ fullName: user.fullName, appUrl: base, token });
     await sendEmail({ to: email, ...msg });
+    await audit({ event: "password.reset.requested", userId: user.id, actorLabel: user.username, req });
   }
   res.json({ ok: true });
 });
@@ -120,10 +148,12 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 app.post("/api/auth/reset-password", async (req, res) => {
   const schema = z.object({
     token: z.string().min(10),
-    newPassword: z.string().min(8),
+    newPassword: z.string().min(1),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const policyError = await validatePassword(parsed.data.newPassword);
+  if (policyError) return res.status(400).json({ error: policyError });
   const rec = await prisma.passwordResetToken.findUnique({ where: { token: parsed.data.token } });
   if (!rec || rec.usedAt || rec.expiresAt < new Date()) {
     return res.status(400).json({ error: "Reset link expired or invalid" });
@@ -132,13 +162,20 @@ app.post("/api/auth/reset-password", async (req, res) => {
   await prisma.$transaction([
     prisma.user.update({
       where: { id: rec.userId },
-      data: { passwordHash: hash, mustChangePwd: false, failedLoginAttempts: 0, lockedUntil: null },
+      data: {
+        passwordHash: hash,
+        mustChangePwd: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        tokenVersion: { increment: 1 },
+      },
     }),
     prisma.passwordResetToken.update({
       where: { id: rec.id },
       data: { usedAt: new Date() },
     }),
   ]);
+  await audit({ event: "password.reset.completed", userId: rec.userId, req });
   res.json({ ok: true });
 });
 
@@ -151,10 +188,12 @@ app.post("/api/auth/signup", async (req, res) => {
   const schema = z.object({
     fullName: z.string().min(2),
     email: z.string().email(),
-    password: z.string().min(8),
+    password: z.string().min(1),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const policyError = await validatePassword(parsed.data.password);
+  if (policyError) return res.status(400).json({ error: policyError });
   const email = parsed.data.email.toLowerCase().trim();
   const existing = await prisma.user.findFirst({
     where: { OR: [{ email }, { username: email }] },
@@ -171,7 +210,8 @@ app.post("/api/auth/signup", async (req, res) => {
       mustChangePwd: false,
     },
   });
-  const token = signToken({ id: user.id, username: user.username, role: user.role, fullName: user.fullName });
+  await audit({ event: "user.created", userId: user.id, actorLabel: user.username, targetType: "user", targetId: user.id, req, meta: { source: "self_signup" } });
+  const token = signToken({ id: user.id, username: user.username, role: user.role, fullName: user.fullName, tokenVersion: user.tokenVersion });
   res.json({
     token,
     user: { id: user.id, username: user.username, fullName: user.fullName, email: user.email, role: user.role, mustChangePwd: false },
@@ -214,6 +254,7 @@ app.post(
       invitedBy: req.user!.fullName,
     });
     await sendEmail({ to: email, ...msg });
+    await audit({ event: "invitation.sent", userId: req.user!.id, actorLabel: req.user!.username, targetType: "invitation", targetId: inv.id, req, meta: { email, role: parsed.data.role } });
     res.json({ id: inv.id, sentTo: email });
   }
 );
@@ -227,9 +268,10 @@ app.get("/api/invitations", authRequired, requireRole("ADMIN"), async (_req, res
   res.json(rows);
 });
 
-app.delete("/api/invitations/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
+app.delete("/api/invitations/:id", authRequired, requireRole("ADMIN"), async (req: AuthRequest, res) => {
   const id = parseInt(req.params.id, 10);
   await prisma.invitation.delete({ where: { id } });
+  await audit({ event: "invitation.revoked", userId: req.user!.id, actorLabel: req.user!.username, targetType: "invitation", targetId: id, req });
   res.json({ ok: true });
 });
 
@@ -244,11 +286,13 @@ app.get("/api/invitations/lookup/:token", async (req, res) => {
 app.post("/api/invitations/accept", async (req, res) => {
   const schema = z.object({
     token: z.string().min(10),
-    password: z.string().min(8),
+    password: z.string().min(1),
     username: z.string().min(2).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const policyError = await validatePassword(parsed.data.password);
+  if (policyError) return res.status(400).json({ error: policyError });
   const inv = await prisma.invitation.findUnique({ where: { token: parsed.data.token } });
   if (!inv || inv.acceptedAt || inv.expiresAt < new Date()) {
     return res.status(400).json({ error: "Invitation invalid or expired" });
@@ -273,11 +317,13 @@ app.post("/api/invitations/accept", async (req, res) => {
     where: { id: inv.id },
     data: { acceptedAt: new Date() },
   });
+  await audit({ event: "invitation.accepted", userId: user.id, actorLabel: user.username, targetType: "invitation", targetId: inv.id, req });
   const tok = signToken({
     id: user.id,
     username: user.username,
     role: user.role,
     fullName: user.fullName,
+    tokenVersion: user.tokenVersion,
   });
   res.json({
     token: tok,
@@ -300,6 +346,7 @@ app.put("/api/auth/profile", authRequired, async (req: AuthRequest, res) => {
   }
   try {
     const u = await prisma.user.update({ where: { id: req.user!.id }, data });
+    await audit({ event: "profile.updated", userId: u.id, actorLabel: u.username, req, meta: data });
     res.json({
       id: u.id,
       username: u.username,
@@ -307,6 +354,7 @@ app.put("/api/auth/profile", authRequired, async (req: AuthRequest, res) => {
       email: u.email,
       role: u.role,
       mustChangePwd: u.mustChangePwd,
+      totpEnabled: u.totpEnabled,
     });
   } catch (e: any) {
     if (e.code === "P2002") return res.status(409).json({ error: "That email is already in use" });
@@ -314,13 +362,73 @@ app.put("/api/auth/profile", authRequired, async (req: AuthRequest, res) => {
   }
 });
 
+/* ===================== 2FA (TOTP) ===================== */
+app.post("/api/auth/2fa/setup", authRequired, async (req: AuthRequest, res) => {
+  const u = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!u) return res.status(404).json({ error: "Not found" });
+  const secret = generateSecret();
+  await prisma.user.update({
+    where: { id: u.id },
+    data: { totpSecret: secret, totpEnabled: false },
+  });
+  const qr = await provisioningQR({ secret, accountLabel: u.email || u.username });
+  res.json({ secret, otpauth: qr.otpauth, qrDataUrl: qr.qrDataUrl });
+});
+
+app.post("/api/auth/2fa/verify", authRequired, async (req: AuthRequest, res) => {
+  const schema = z.object({ code: z.string().min(6).max(8) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid code" });
+  const u = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!u || !u.totpSecret) {
+    return res.status(400).json({ error: "Start 2FA setup first" });
+  }
+  if (!(await verifyTotp(parsed.data.code, u.totpSecret))) {
+    return res.status(400).json({ error: "Code didn't match. Try again with a fresh code." });
+  }
+  await prisma.user.update({
+    where: { id: u.id },
+    data: { totpEnabled: true, tokenVersion: { increment: 1 } },
+  });
+  await audit({ event: "2fa.enrolled", userId: u.id, actorLabel: u.username, req });
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/2fa/disable", authRequired, async (req: AuthRequest, res) => {
+  const schema = z.object({ password: z.string().min(1), code: z.string().optional() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const u = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!u) return res.status(404).json({ error: "Not found" });
+  const ok = await bcrypt.compare(parsed.data.password, u.passwordHash);
+  if (!ok) return res.status(401).json({ error: "Password incorrect" });
+  if (u.totpEnabled) {
+    if (!parsed.data.code || !u.totpSecret || !(await verifyTotp(parsed.data.code, u.totpSecret))) {
+      return res.status(400).json({ error: "Enter a current 6-digit code to disable 2FA." });
+    }
+  }
+  // Block disabling if 2FA is required for admins and this user is an admin
+  const require2faAdminRow = await prisma.setting.findUnique({ where: { key: "require_2fa_admin" } });
+  if (require2faAdminRow?.value === "true" && u.role === "ADMIN") {
+    return res.status(403).json({ error: "2FA is required for Admin accounts. Ask another admin to disable enforcement first." });
+  }
+  await prisma.user.update({
+    where: { id: u.id },
+    data: { totpEnabled: false, totpSecret: null, tokenVersion: { increment: 1 } },
+  });
+  await audit({ event: "2fa.disabled", userId: u.id, actorLabel: u.username, req });
+  res.json({ ok: true });
+});
+
 app.post("/api/auth/change-password", authRequired, async (req: AuthRequest, res) => {
   const schema = z.object({
     currentPassword: z.string().min(1),
-    newPassword: z.string().min(8),
+    newPassword: z.string().min(1),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const policyError = await validatePassword(parsed.data.newPassword);
+  if (policyError) return res.status(400).json({ error: policyError });
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
   if (!user) return res.status(404).json({ error: "User not found" });
   const ok = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
@@ -328,8 +436,19 @@ app.post("/api/auth/change-password", authRequired, async (req: AuthRequest, res
   const hash = await bcrypt.hash(parsed.data.newPassword, 10);
   await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: hash, mustChangePwd: false },
+    data: { passwordHash: hash, mustChangePwd: false, tokenVersion: { increment: 1 } },
   });
+  await audit({ event: "password.changed", userId: user.id, actorLabel: user.username, req });
+  res.json({ ok: true });
+});
+
+// Sign out from every device (bumps tokenVersion so all existing JWTs fail)
+app.post("/api/auth/logout-all", authRequired, async (req: AuthRequest, res) => {
+  await prisma.user.update({
+    where: { id: req.user!.id },
+    data: { tokenVersion: { increment: 1 } },
+  });
+  await audit({ event: "logout.all", userId: req.user!.id, actorLabel: req.user!.username, req });
   res.json({ ok: true });
 });
 
@@ -343,13 +462,22 @@ app.get("/api/auth/me", authRequired, async (req: AuthRequest, res) => {
     email: u.email,
     role: u.role,
     mustChangePwd: u.mustChangePwd,
+    totpEnabled: u.totpEnabled,
   });
 });
 
 // Public bootstrap config (anything safe for unauthenticated users)
 app.get("/api/auth/public-config", async (_req, res) => {
-  const s = await prisma.setting.findUnique({ where: { key: "allow_self_signup" } });
-  res.json({ allowSelfSignup: s?.value === "true" });
+  const rows = await prisma.setting.findMany({
+    where: { key: { in: ["allow_self_signup", "password_min_length", "password_require_mixed"] } },
+  });
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.key] = r.value;
+  res.json({
+    allowSelfSignup: map.allow_self_signup === "true",
+    passwordMinLength: parseInt(map.password_min_length || "8", 10),
+    passwordRequireMixed: map.password_require_mixed === "true",
+  });
 });
 
 /* ===================== SETTINGS ===================== */
@@ -364,8 +492,9 @@ app.put(
   "/api/settings",
   authRequired,
   requireRole("ADMIN", "LEADERSHIP"),
-  async (req, res) => {
+  async (req: AuthRequest, res) => {
     const body = req.body as Record<string, string>;
+    const keys = Object.keys(body);
     for (const [key, value] of Object.entries(body)) {
       await prisma.setting.upsert({
         where: { key },
@@ -373,6 +502,7 @@ app.put(
         create: { key, value: String(value) },
       });
     }
+    await audit({ event: "settings.updated", userId: req.user!.id, actorLabel: req.user!.username, req, meta: { keys } });
     res.json({ ok: true });
   }
 );
@@ -448,17 +578,21 @@ app.post(
   "/api/users",
   authRequired,
   requireRole("ADMIN"),
-  async (req, res) => {
+  async (req: AuthRequest, res) => {
     const schema = z.object({
       username: z.string().min(2),
       fullName: z.string().min(1),
       email: z.string().email().nullable().optional(),
       role: z.enum(["ADMIN", "LEADERSHIP", "ESTIMATOR", "PM", "READ_ONLY"]),
-      password: z.string().min(8).optional(),
+      password: z.string().optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Invalid input" });
+    if (parsed.data.password) {
+      const policyError = await validatePassword(parsed.data.password);
+      if (policyError) return res.status(400).json({ error: policyError });
+    }
     const hash = await bcrypt.hash(parsed.data.password || "Redland2026!", 10);
     const user = await prisma.user.create({
       data: {
@@ -470,6 +604,15 @@ app.post(
         mustChangePwd: true,
       },
     });
+    await audit({
+      event: "user.created",
+      userId: req.user!.id,
+      actorLabel: req.user!.username,
+      targetType: "user",
+      targetId: user.id,
+      req,
+      meta: { role: parsed.data.role, byAdmin: true },
+    });
     res.json({ id: user.id });
   }
 );
@@ -478,18 +621,44 @@ app.put(
   "/api/users/:id",
   authRequired,
   requireRole("ADMIN"),
-  async (req, res) => {
+  async (req: AuthRequest, res) => {
     const id = parseInt(req.params.id, 10);
     const { fullName, role, isActive, password } = req.body as any;
+    const prior = await prisma.user.findUnique({ where: { id } });
+    if (!prior) return res.status(404).json({ error: "Not found" });
     const data: any = {};
     if (fullName !== undefined) data.fullName = fullName;
     if (role !== undefined) data.role = role;
     if (isActive !== undefined) data.isActive = isActive;
     if (password) {
+      const policyError = await validatePassword(password);
+      if (policyError) return res.status(400).json({ error: policyError });
       data.passwordHash = await bcrypt.hash(password, 10);
       data.mustChangePwd = true;
+      data.tokenVersion = { increment: 1 };
     }
     await prisma.user.update({ where: { id }, data });
+    if (role !== undefined && role !== prior.role) {
+      await audit({
+        event: "user.role_changed",
+        userId: req.user!.id,
+        actorLabel: req.user!.username,
+        targetType: "user",
+        targetId: id,
+        req,
+        meta: { from: prior.role, to: role },
+      });
+    }
+    if (password) {
+      await audit({
+        event: "user.password_reset_by_admin",
+        userId: req.user!.id,
+        actorLabel: req.user!.username,
+        targetType: "user",
+        targetId: id,
+        req,
+      });
+    }
     res.json({ ok: true });
   }
 );
@@ -498,13 +667,43 @@ app.delete(
   "/api/users/:id",
   authRequired,
   requireRole("ADMIN"),
-  async (req, res) => {
+  async (req: AuthRequest, res) => {
     const id = parseInt(req.params.id, 10);
     await prisma.user.update({
       where: { id },
-      data: { isArchived: true, isActive: false },
+      data: { isArchived: true, isActive: false, tokenVersion: { increment: 1 } },
+    });
+    await audit({
+      event: "user.deactivated",
+      userId: req.user!.id,
+      actorLabel: req.user!.username,
+      targetType: "user",
+      targetId: id,
+      req,
     });
     res.json({ ok: true });
+  }
+);
+
+/* ===================== AUDIT LOG (read) ===================== */
+app.get(
+  "/api/audit-log",
+  authRequired,
+  requireRole("ADMIN", "LEADERSHIP"),
+  async (req, res) => {
+    const limit = Math.min(parseInt((req.query.limit as string) || "200", 10), 1000);
+    const event = req.query.event as string | undefined;
+    const userId = req.query.userId ? parseInt(req.query.userId as string, 10) : undefined;
+    const rows = await prisma.auditLog.findMany({
+      where: {
+        ...(event ? { event } : {}),
+        ...(userId ? { userId } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: { user: { select: { id: true, fullName: true, username: true } } },
+    });
+    res.json(rows);
   }
 );
 
