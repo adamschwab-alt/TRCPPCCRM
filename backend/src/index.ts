@@ -927,10 +927,86 @@ app.put(
           changedById: req.user!.id,
         },
       });
+      // Polite-loss auto-draft: when a bid moves to LOST, drop a templated
+      // follow-up note on the timeline so the estimator can copy/paste it
+      // to the GC. Preserves last-look relationships at near-zero cost.
+      if (stageChanged === "LOST") {
+        const enabled = await prisma.setting.findUnique({ where: { key: "polite_loss_enabled" } });
+        if (enabled?.value !== "false") {
+          const tpl = await prisma.setting.findUnique({ where: { key: "polite_loss_template" } });
+          if (tpl?.value) {
+            const body = `📧 Suggested follow-up to ${existing.customerName}:\n\n${tpl.value}`;
+            await prisma.opportunityNote.create({
+              data: { opportunityId: id, authorId: req.user!.id, body },
+            });
+          }
+        }
+      }
     }
     res.json(updated);
   }
 );
+
+// Customer Project History — every (other) bid we've tracked for this customer.
+app.get("/api/opportunities/:id/customer-history", authRequired, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const op = await prisma.opportunity.findUnique({
+    where: { id },
+    select: { customerName: true, customerId: true },
+  });
+  if (!op) return res.status(404).json({ error: "Not found" });
+  const where: any = {
+    isArchived: false,
+    id: { not: id },
+    OR: [{ customerName: op.customerName }],
+  };
+  if (op.customerId) where.OR.push({ customerId: op.customerId });
+  const ops = await prisma.opportunity.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      projectNumber: true,
+      projectName: true,
+      stage: true,
+      estimatedValueCents: true,
+      actualValueCents: true,
+      winningBidCents: true,
+      bidDueDate: true,
+      decidedAt: true,
+      lossReason: true,
+      winningBidder: true,
+      noBidReason: true,
+    },
+    take: 50,
+  });
+  // Aggregates
+  const won = ops.filter((o) => o.stage === "WON");
+  const lost = ops.filter((o) => o.stage === "LOST");
+  const winRate = won.length + lost.length === 0 ? null : won.length / (won.length + lost.length);
+  const wonRevenueCents = won.reduce((a, o) => a + Number(o.actualValueCents ?? o.estimatedValueCents), 0);
+  const bidVolumeCents = ops
+    .filter((o) => ["WON", "LOST"].includes(o.stage))
+    .reduce((a, o) => a + Number(o.estimatedValueCents), 0);
+  const weightedHitRate = bidVolumeCents === 0 ? null : wonRevenueCents / bidVolumeCents;
+  const lastDecidedAt = ops
+    .filter((o) => o.decidedAt)
+    .map((o) => o.decidedAt as Date)
+    .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  res.json({
+    opportunities: ops,
+    summary: {
+      total: ops.length,
+      won: won.length,
+      lost: lost.length,
+      winRate,
+      weightedHitRate,
+      wonRevenueCents,
+      bidVolumeCents,
+      lastDecidedAt,
+    },
+  });
+});
 
 app.delete(
   "/api/opportunities/:id",

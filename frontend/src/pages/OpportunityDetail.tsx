@@ -8,6 +8,7 @@ import Modal from "../components/Modal";
 import OpportunityForm from "../components/OpportunityForm";
 import StageChangePrompt from "../components/StageChangePrompt";
 import GoNoGoForm from "../components/GoNoGoForm";
+import CustomerHistoryPanel from "../components/CustomerHistoryPanel";
 
 export default function OpportunityDetail() {
   const { id } = useParams();
@@ -19,6 +20,9 @@ export default function OpportunityDetail() {
   const [editing, setEditing] = useState(false);
   const [stagePrompt, setStagePrompt] = useState<Stage | null>(null);
   const [showGoNoGo, setShowGoNoGo] = useState(false);
+  const [chainPrompt, setChainPrompt] = useState(false);
+  const [chainDate, setChainDate] = useState("");
+  const [chainNote, setChainNote] = useState("");
   const nav = useNavigate();
   const readOnly = user?.role === "READ_ONLY";
 
@@ -45,6 +49,8 @@ export default function OpportunityDetail() {
 
     if (stage === "GO_NO_GO" && enabled("go_no_go")) {
       setShowGoNoGo(true);
+    } else if (!["WON", "LOST", "NO_BID", "WITHDRAWN"].includes(stage) && !op.nextActionDate) {
+      setChainPrompt(true);
     }
   }
 
@@ -58,9 +64,29 @@ export default function OpportunityDetail() {
       });
       setNoteText("");
       await load();
+      // Activity chaining: if there's no next action set, prompt to schedule one.
+      // This is the Pipedrive pattern — every open deal should always have a next step.
+      if (!op.nextActionDate && !["WON", "LOST", "NO_BID", "WITHDRAWN"].includes(op.stage)) {
+        setChainPrompt(true);
+      }
     } finally {
       setPosting(false);
     }
+  }
+
+  async function saveChainAction() {
+    if (!chainDate || !op) {
+      setChainPrompt(false);
+      return;
+    }
+    await api(`/api/opportunities/${op.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ nextActionDate: chainDate, nextActionNote: chainNote || null }),
+    });
+    setChainPrompt(false);
+    setChainDate("");
+    setChainNote("");
+    await load();
   }
 
   async function archive() {
@@ -234,6 +260,21 @@ export default function OpportunityDetail() {
         </div>
 
         <div className="space-y-4">
+          {chainPrompt && (
+            <div className="card p-4 bg-redland-gold/10 border-redland-gold/40 border">
+              <div className="font-bold text-redland-charcoal mb-1">What's next?</div>
+              <p className="text-xs text-gray-600 mb-2">Set a follow-up so this deal doesn't go stale.</p>
+              <div className="grid grid-cols-3 gap-2">
+                <input type="date" className="input" value={chainDate} onChange={(e) => setChainDate(e.target.value)} />
+                <input className="input col-span-2" placeholder="e.g. call GC for status" value={chainNote} onChange={(e) => setChainNote(e.target.value)} />
+              </div>
+              <div className="flex justify-end gap-2 mt-2">
+                <button onClick={() => { setChainPrompt(false); setChainDate(""); setChainNote(""); }} className="btn-ghost text-xs">Skip</button>
+                <button onClick={saveChainAction} disabled={!chainDate} className="btn-primary text-xs disabled:opacity-50">Schedule</button>
+              </div>
+            </div>
+          )}
+
           <div className="card p-4">
             <div className="font-bold text-redland-charcoal mb-2">Activity Log</div>
             {!readOnly && (
@@ -268,6 +309,8 @@ export default function OpportunityDetail() {
               )}
             </div>
           </div>
+
+          <CustomerHistoryPanel opportunityId={op.id} currentValueCents={op.estimatedValueCents} />
 
           <div className="card p-4">
             <div className="font-bold text-redland-charcoal mb-2">Stage History</div>

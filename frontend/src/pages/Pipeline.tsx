@@ -7,8 +7,9 @@ import Modal from "../components/Modal";
 import OpportunityForm from "../components/OpportunityForm";
 import StageChangePrompt from "../components/StageChangePrompt";
 import { isRotting, hasNoNextAction, nextActionStatus, daysSince, rottingDays } from "../hygiene";
+import BidCalendar from "../components/BidCalendar";
 
-type View = "kanban" | "list";
+type View = "kanban" | "list" | "calendar";
 
 export default function Pipeline() {
   const { dropdowns, settings } = useSettings();
@@ -175,6 +176,14 @@ export default function Pipeline() {
             >
               List
             </button>
+            <button
+              onClick={() => setView("calendar")}
+              className={`px-3 py-2 text-sm font-semibold ${
+                view === "calendar" ? "bg-redland-charcoal text-white" : "text-redland-charcoal"
+              }`}
+            >
+              Calendar
+            </button>
           </div>
           <button onClick={exportCSV} className="btn-ghost">
             Export CSV
@@ -314,6 +323,8 @@ export default function Pipeline() {
 
       {loading ? (
         <div className="text-gray-500">Loading pipeline…</div>
+      ) : view === "calendar" ? (
+        <BidCalendar opportunities={filtered} />
       ) : view === "kanban" ? (
         <div className="grid grid-flow-col auto-cols-[minmax(260px,1fr)] gap-3 overflow-x-auto pb-2">
           {STAGES.map((s) => (

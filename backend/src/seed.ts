@@ -121,6 +121,8 @@ const SETTINGS: Record<string, string> = {
   rot_LOST: "0",
   rot_NO_BID: "0",
   rot_WITHDRAWN: "0",
+  polite_loss_enabled: "true",
+  polite_loss_template: "Thanks again for the opportunity to bid on this project. Congratulations on the award and we appreciate the chance to put numbers together for you. Please keep us in mind for the next one — we'd love another shot.\n\n— The Redland Company",
 };
 
 async function main() {

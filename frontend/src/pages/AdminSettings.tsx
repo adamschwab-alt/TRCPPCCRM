@@ -278,6 +278,29 @@ export default function AdminSettings() {
           </div>
 
           <div className="card p-4 space-y-3">
+            <div className="font-bold text-redland-charcoal">Polite-loss follow-up</div>
+            <p className="text-xs text-gray-600">When a bid is marked Lost, this templated note is auto-added to the opportunity timeline so an estimator can copy/paste it to the GC — preserves the relationship for next time.</p>
+            <div className="flex items-center justify-between py-1">
+              <div className="font-semibold text-sm">Enabled</div>
+              <button
+                onClick={() => set("polite_loss_enabled", local.polite_loss_enabled === "false" ? "true" : "false")}
+                className={`relative w-12 h-6 rounded-full transition-colors ${local.polite_loss_enabled !== "false" ? "bg-redland-red" : "bg-gray-300"}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${local.polite_loss_enabled !== "false" ? "translate-x-6" : ""}`} />
+              </button>
+            </div>
+            <div>
+              <label className="label">Template</label>
+              <textarea
+                className="input"
+                rows={5}
+                value={local.polite_loss_template || ""}
+                onChange={(e) => set("polite_loss_template", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="card p-4 space-y-3">
             <div className="font-bold text-redland-charcoal">Pipeline rotting thresholds (days)</div>
             <p className="text-xs text-gray-600">Deals with no activity (notes, stage changes, edits) for this many days show up as <strong>Stale</strong> on the pipeline. Set to 0 to disable for a stage.</p>
             <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
