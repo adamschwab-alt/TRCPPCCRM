@@ -2,6 +2,8 @@ import "./util";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
+import path from "path";
+import fs from "fs";
 import { z } from "zod";
 import { prisma } from "./db";
 import {
@@ -843,6 +845,16 @@ app.get("/api/analytics/summary", authRequired, async (_req, res) => {
     topCustomers,
   });
 });
+
+/* ===================== STATIC SPA (production) ===================== */
+const STATIC_DIR = path.resolve(__dirname, "../public");
+if (fs.existsSync(STATIC_DIR)) {
+  app.use(express.static(STATIC_DIR));
+  app.get(/^(?!\/api).*/, (_req, res) => {
+    res.sendFile(path.join(STATIC_DIR, "index.html"));
+  });
+  console.log(`Serving SPA from ${STATIC_DIR}`);
+}
 
 /* ===================== START ===================== */
 const PORT = parseInt(process.env.PORT || "4000", 10);

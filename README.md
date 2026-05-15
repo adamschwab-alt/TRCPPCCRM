@@ -159,6 +159,38 @@ The same Admin screen also lets you:
 
 ---
 
+## One-Click Cloud Deploy
+
+The repo ships with a combined `Dockerfile` (root) and a `railway.json` that bundles the React frontend and Express backend into one container. The backend serves both `/api/*` and the SPA on the same port.
+
+### Railway (recommended — easiest)
+
+1. Push your fork to GitHub if you haven't already.
+2. Go to [railway.com/new](https://railway.com/new) → **Deploy from GitHub repo** → pick this repo and branch `claude/redland-crm-pipeline-tracker-97N5n`.
+3. In your new project, click **+ New → Database → PostgreSQL**. Railway will auto-inject `DATABASE_URL` into the service.
+4. Open the app service → **Variables** → add:
+   - `JWT_SECRET` — any long random string
+5. **Settings → Networking → Generate Domain**. You'll get a public URL like `https://your-app.up.railway.app`.
+6. First boot runs `prisma db push` + seed automatically. Log in as `adam.schwab` / `Redland2026!` (forced password change on first login).
+
+### Render
+
+1. Go to [render.com](https://render.com) → **New + → Blueprint** → connect this repo.
+2. Render reads the root `Dockerfile`. Add a PostgreSQL database in the dashboard and copy its **Internal Database URL** into the web service's `DATABASE_URL` env var.
+3. Add `JWT_SECRET`. Deploy. Open the assigned URL.
+
+### Fly.io
+
+```bash
+fly launch        # detects root Dockerfile, follow prompts
+fly postgres create
+fly postgres attach <pg-app>
+fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
+fly deploy
+```
+
+---
+
 ## Azure Deployment Guide
 
 The app deploys cleanly to Azure with three components:
