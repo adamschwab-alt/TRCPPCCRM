@@ -145,6 +145,8 @@ model Customer {
   updatedById     Int?
 
   opportunities Opportunity[]
+  contacts      Contact[]      @relation("ContactCurrent")
+  complianceDocs ComplianceDoc[]
 }
 
 model Opportunity {
@@ -167,6 +169,7 @@ model Opportunity {
   estimatedStartDate    DateTime?
   estimatedDurationMonths Int?
   stage                 PipelineStage  @default(LEAD)
+  pipelineBoard         String         @default("main")
   bondingRequired       Boolean        @default(false)
   bondAmountCents       BigInt?
   estimatorId           Int?
@@ -184,6 +187,7 @@ model Opportunity {
   goNoGoProjectScore    Float?
   goNoGoCompetitionScore Float?
   goNoGoDecisionBand    String?
+  pwin                  Float?
   backlogStatus         BacklogStatus  @default(ACTIVE)
   stageChangedAt        DateTime       @default(now())
   bidSubmittedAt        DateTime?
@@ -203,12 +207,98 @@ model Opportunity {
   goNoGoDecisions     GoNoGoDecisionRecord[]
 
   @@index([stage])
+  @@index([pipelineBoard])
   @@index([estimatorId])
   @@index([customerId])
   @@index([region])
   @@index([projectType])
   @@index([nextActionDate])
   @@index([lastActivityAt])
+}
+
+model SavedView {
+  id          Int      @id @default(autoincrement())
+  name        String
+  scope       String   @default("PRIVATE") // PRIVATE | TEAM | ORG
+  ownerId     Int?
+  filtersJson String
+  sortOrder   Int      @default(0)
+  isPinned    Boolean  @default(false)
+  page        String   @default("pipeline") // future-proof: views per page
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PipelineBoard {
+  id        Int      @id @default(autoincrement())
+  slug      String   @unique
+  name      String
+  color     String   @default("#8B1A1A")
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+}
+
+model AutomationRule {
+  id          Int      @id @default(autoincrement())
+  name        String
+  trigger     String   // STAGE_CHANGED_TO | OPPORTUNITY_CREATED | NEXT_ACTION_OVERDUE
+  triggerArg  String?  // e.g. stage name for STAGE_CHANGED_TO
+  action      String   // CREATE_NOTE | SET_NEXT_ACTION | SEND_EMAIL_TEMPLATE
+  actionArgs  String   // JSON
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ComplianceDoc {
+  id          Int      @id @default(autoincrement())
+  docType     String   // COI | W9 | LICENSE | MBE | WBE | DBE | OTHER
+  label       String?
+  customerId  Int?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  userId      Int?
+  expiresAt   DateTime?
+  notes       String?
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([customerId])
+}
+
+model Contact {
+  id              Int      @id @default(autoincrement())
+  fullName        String
+  email           String?
+  phone           String?
+  title           String?
+  currentCustomerId Int?
+  currentCustomer Customer? @relation("ContactCurrent", fields: [currentCustomerId], references: [id])
+  notes           String?
+  isArchived      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  employmentHistory ContactEmployment[]
+
+  @@index([fullName])
+  @@index([email])
+  @@index([currentCustomerId])
+}
+
+model ContactEmployment {
+  id          Int      @id @default(autoincrement())
+  contactId   Int
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  customerId  Int?
+  customerName String   // denormalized for resilience
+  title       String?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([contactId])
 }
 
 model OpportunityNote {

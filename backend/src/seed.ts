@@ -125,6 +125,13 @@ const SETTINGS: Record<string, string> = {
   polite_loss_template: "Thanks again for the opportunity to bid on this project. Congratulations on the award and we appreciate the chance to put numbers together for you. Please keep us in mind for the next one — we'd love another shot.\n\n— The Redland Company",
 };
 
+const BOARDS = [
+  { slug: "main", name: "Main Pipeline", color: "#8B1A1A", sortOrder: 0 },
+  { slug: "public", name: "Public / DOT", color: "#2D2D2D", sortOrder: 1 },
+  { slug: "negotiated", name: "Negotiated / Last-Look", color: "#C9A84C", sortOrder: 2 },
+  { slug: "private", name: "Private Repeat", color: "#6e1414", sortOrder: 3 },
+];
+
 async function main() {
   const hash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
@@ -158,6 +165,14 @@ async function main() {
       where: { key },
       update: {},
       create: { key, value },
+    });
+  }
+
+  for (const b of BOARDS) {
+    await prisma.pipelineBoard.upsert({
+      where: { slug: b.slug },
+      update: { name: b.name, color: b.color, sortOrder: b.sortOrder },
+      create: b,
     });
   }
 

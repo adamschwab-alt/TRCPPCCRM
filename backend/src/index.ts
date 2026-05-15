@@ -712,6 +712,7 @@ const opportunityWriteSchema = z.object({
   projectName: z.string().min(1),
   customerName: z.string().min(1),
   customerId: z.number().int().nullable().optional(),
+  pipelineBoard: z.string().optional(),
   nextActionDate: z.string().nullable().optional(),
   nextActionNote: z.string().nullable().optional(),
   customerType: z
@@ -797,6 +798,7 @@ app.get("/api/opportunities", authRequired, async (req, res) => {
     search,
     from,
     to,
+    pipelineBoard,
   } = req.query as Record<string, string>;
   const where: any = { isArchived: false };
   if (stage) where.stage = stage;
@@ -806,6 +808,7 @@ app.get("/api/opportunities", authRequired, async (req, res) => {
   if (customerType) where.customerType = customerType;
   if (source) where.source = source;
   if (bondingRequired) where.bondingRequired = bondingRequired === "true";
+  if (pipelineBoard) where.pipelineBoard = pipelineBoard;
   if (search) {
     where.OR = [
       { projectName: { contains: search, mode: "insensitive" } },
@@ -942,10 +945,76 @@ app.put(
           }
         }
       }
+
+      // Cadenced post-submission follow-up (M7): when a bid hits Bid Submitted,
+      // auto-set next action +3 days unless one is already scheduled. The user
+      // reschedules as the cadence rolls forward (day 7/14/30).
+      if (stageChanged === "BID_SUBMITTED" && !existing.nextActionDate) {
+        const followUp = new Date();
+        followUp.setDate(followUp.getDate() + 3);
+        await prisma.opportunity.update({
+          where: { id },
+          data: {
+            nextActionDate: followUp,
+            nextActionNote: `Day 3 follow-up: check status with ${existing.customerName}`,
+          },
+        });
+      }
+
+      // Run user-defined automation rules
+      await runAutomations({
+        trigger: "STAGE_CHANGED_TO",
+        triggerArg: stageChanged,
+        opportunityId: id,
+        actorUserId: req.user!.id,
+        customerName: existing.customerName,
+      });
     }
     res.json(updated);
   }
 );
+
+// Automation rule runner — evaluates user-defined rules on triggers.
+async function runAutomations(args: {
+  trigger: string;
+  triggerArg?: string | null;
+  opportunityId: number;
+  actorUserId: number;
+  customerName?: string | null;
+}) {
+  try {
+    const rules = await prisma.automationRule.findMany({
+      where: { enabled: true, trigger: args.trigger },
+    });
+    for (const r of rules) {
+      if (r.triggerArg && r.triggerArg !== args.triggerArg) continue;
+      const a = JSON.parse(r.actionArgs || "{}");
+      if (r.action === "CREATE_NOTE") {
+        const body = String(a.body || "").replace(/\{customer\}/g, args.customerName || "");
+        if (body) {
+          await prisma.opportunityNote.create({
+            data: { opportunityId: args.opportunityId, authorId: args.actorUserId, body },
+          });
+        }
+      } else if (r.action === "SET_NEXT_ACTION") {
+        const days = parseInt(a.daysFromNow || "3", 10);
+        const d = new Date();
+        d.setDate(d.getDate() + days);
+        await prisma.opportunity.update({
+          where: { id: args.opportunityId },
+          data: { nextActionDate: d, nextActionNote: a.note || null },
+        });
+      } else if (r.action === "SEND_EMAIL_TEMPLATE") {
+        const to = a.to;
+        const subject = String(a.subject || "Redland CRM notification");
+        const body = String(a.body || "").replace(/\{customer\}/g, args.customerName || "");
+        if (to) await sendEmail({ to, subject, html: `<pre>${body}</pre>`, text: body });
+      }
+    }
+  } catch (e) {
+    console.error("automation error:", e);
+  }
+}
 
 // Customer Project History — every (other) bid we've tracked for this customer.
 app.get("/api/opportunities/:id/customer-history", authRequired, async (req, res) => {
@@ -1124,6 +1193,10 @@ app.post(
         conditions: s.conditions || null,
       },
     });
+    // PWIN: simple derivation from composite score (0–100 → 0–1).
+    // Vantagepoint pattern — pipeline-weighted revenue uses this.
+    const pwin = Math.max(0, Math.min(1, composite / 100));
+
     await prisma.opportunity.update({
       where: { id },
       data: {
@@ -1132,10 +1205,11 @@ app.post(
         goNoGoProjectScore: projectScore,
         goNoGoCompetitionScore: competitionScore,
         goNoGoDecisionBand: band,
+        pwin,
         lastActivityAt: new Date(),
       },
     });
-    res.json({ ...rec, clientScore, projectScore, competitionScore, band });
+    res.json({ ...rec, clientScore, projectScore, competitionScore, band, pwin });
   }
 );
 
@@ -1623,6 +1697,433 @@ app.get("/api/dashboard/today", authRequired, async (req: AuthRequest, res) => {
     overdueBidCount: overdueBids.length,
     suggestions: suggestions.slice(0, 12),
     recentDecisions,
+  });
+});
+
+/* ===================== SAVED VIEWS (Q7) ===================== */
+app.get("/api/saved-views", authRequired, async (req: AuthRequest, res) => {
+  const page = (req.query.page as string) || "pipeline";
+  const rows = await prisma.savedView.findMany({
+    where: {
+      page,
+      OR: [
+        { scope: "ORG" },
+        { scope: "TEAM" },
+        { scope: "PRIVATE", ownerId: req.user!.id },
+      ],
+    },
+    orderBy: [{ isPinned: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+  });
+  res.json(rows);
+});
+
+app.post("/api/saved-views", authRequired, readOnlyBlocked, async (req: AuthRequest, res) => {
+  const schema = z.object({
+    name: z.string().min(1),
+    scope: z.enum(["PRIVATE", "TEAM", "ORG"]),
+    filters: z.record(z.any()),
+    page: z.string().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const v = await prisma.savedView.create({
+    data: {
+      name: parsed.data.name,
+      scope: parsed.data.scope,
+      ownerId: req.user!.id,
+      filtersJson: JSON.stringify(parsed.data.filters),
+      page: parsed.data.page || "pipeline",
+    },
+  });
+  res.json(v);
+});
+
+app.delete("/api/saved-views/:id", authRequired, readOnlyBlocked, async (req: AuthRequest, res) => {
+  const id = parseInt(req.params.id, 10);
+  const v = await prisma.savedView.findUnique({ where: { id } });
+  if (!v) return res.status(404).json({ error: "Not found" });
+  // Only owner OR admin can delete
+  if (v.scope === "PRIVATE" && v.ownerId !== req.user!.id) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if ((v.scope === "TEAM" || v.scope === "ORG") && req.user!.role !== "ADMIN" && v.ownerId !== req.user!.id) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  await prisma.savedView.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+/* ===================== PIPELINE BOARDS (M5) ===================== */
+app.get("/api/boards", authRequired, async (_req, res) => {
+  const rows = await prisma.pipelineBoard.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  res.json(rows);
+});
+
+app.post("/api/boards", authRequired, requireRole("ADMIN", "LEADERSHIP"), async (req, res) => {
+  const schema = z.object({
+    slug: z.string().min(2).regex(/^[a-z0-9_-]+$/),
+    name: z.string().min(1),
+    color: z.string().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const last = await prisma.pipelineBoard.findFirst({ orderBy: { sortOrder: "desc" } });
+  const b = await prisma.pipelineBoard.create({
+    data: {
+      slug: parsed.data.slug,
+      name: parsed.data.name,
+      color: parsed.data.color || "#8B1A1A",
+      sortOrder: (last?.sortOrder ?? -1) + 1,
+    },
+  });
+  res.json(b);
+});
+
+app.delete("/api/boards/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  await prisma.pipelineBoard.update({ where: { id }, data: { isActive: false } });
+  res.json({ ok: true });
+});
+
+/* ===================== BULK OPERATIONS (Q6) ===================== */
+app.post("/api/opportunities/bulk-update", authRequired, readOnlyBlocked, async (req: AuthRequest, res) => {
+  const schema = z.object({
+    ids: z.array(z.number().int()).min(1).max(500),
+    stage: z.string().optional(),
+    estimatorId: z.number().int().nullable().optional(),
+    pipelineBoard: z.string().optional(),
+    archive: z.boolean().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const { ids, stage, estimatorId, pipelineBoard, archive } = parsed.data;
+  const data: any = { updatedById: req.user!.id, lastActivityAt: new Date() };
+  if (stage) {
+    data.stage = stage;
+    data.stageChangedAt = new Date();
+  }
+  if (estimatorId !== undefined) data.estimatorId = estimatorId;
+  if (pipelineBoard) data.pipelineBoard = pipelineBoard;
+  if (archive) data.isArchived = true;
+
+  await prisma.opportunity.updateMany({ where: { id: { in: ids } }, data });
+  if (stage) {
+    // log stage history rows
+    await Promise.all(
+      ids.map((id) =>
+        prisma.stageHistory.create({
+          data: { opportunityId: id, toStage: stage as any, changedById: req.user!.id },
+        })
+      )
+    );
+  }
+  res.json({ ok: true, updated: ids.length });
+});
+
+/* ===================== AUTOMATION RULES (M6) ===================== */
+app.get("/api/automation-rules", authRequired, requireRole("ADMIN", "LEADERSHIP"), async (_req, res) => {
+  const rules = await prisma.automationRule.findMany({ orderBy: { createdAt: "desc" } });
+  res.json(rules);
+});
+
+app.post("/api/automation-rules", authRequired, requireRole("ADMIN"), async (req, res) => {
+  const schema = z.object({
+    name: z.string().min(1),
+    trigger: z.enum(["STAGE_CHANGED_TO", "OPPORTUNITY_CREATED", "NEXT_ACTION_OVERDUE"]),
+    triggerArg: z.string().nullable().optional(),
+    action: z.enum(["CREATE_NOTE", "SET_NEXT_ACTION", "SEND_EMAIL_TEMPLATE"]),
+    actionArgs: z.record(z.any()),
+    enabled: z.boolean().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const r = await prisma.automationRule.create({
+    data: {
+      name: parsed.data.name,
+      trigger: parsed.data.trigger,
+      triggerArg: parsed.data.triggerArg ?? null,
+      action: parsed.data.action,
+      actionArgs: JSON.stringify(parsed.data.actionArgs),
+      enabled: parsed.data.enabled ?? true,
+    },
+  });
+  res.json(r);
+});
+
+app.put("/api/automation-rules/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { enabled, name, triggerArg, action, actionArgs } = req.body as any;
+  const data: any = {};
+  if (enabled !== undefined) data.enabled = enabled;
+  if (name) data.name = name;
+  if (triggerArg !== undefined) data.triggerArg = triggerArg;
+  if (action) data.action = action;
+  if (actionArgs) data.actionArgs = JSON.stringify(actionArgs);
+  await prisma.automationRule.update({ where: { id }, data });
+  res.json({ ok: true });
+});
+
+app.delete("/api/automation-rules/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
+  await prisma.automationRule.delete({ where: { id: parseInt(req.params.id, 10) } });
+  res.json({ ok: true });
+});
+
+/* ===================== COMPLIANCE VAULT (M12) ===================== */
+app.get("/api/compliance-docs", authRequired, async (req, res) => {
+  const { customerId, expiringWithinDays } = req.query as Record<string, string>;
+  const where: any = { isArchived: false };
+  if (customerId) where.customerId = parseInt(customerId, 10);
+  if (expiringWithinDays) {
+    const ms = parseInt(expiringWithinDays, 10) * 86_400_000;
+    where.expiresAt = { lte: new Date(Date.now() + ms), gte: new Date() };
+  }
+  const rows = await prisma.complianceDoc.findMany({
+    where,
+    orderBy: [{ expiresAt: "asc" }],
+    include: { customer: { select: { id: true, companyName: true } } },
+  });
+  res.json(rows);
+});
+
+app.post("/api/compliance-docs", authRequired, readOnlyBlocked, async (req: AuthRequest, res) => {
+  const schema = z.object({
+    docType: z.enum(["COI", "W9", "LICENSE", "MBE", "WBE", "DBE", "OTHER"]),
+    label: z.string().nullable().optional(),
+    customerId: z.number().int().nullable().optional(),
+    userId: z.number().int().nullable().optional(),
+    expiresAt: z.string().nullable().optional(),
+    notes: z.string().nullable().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const d = await prisma.complianceDoc.create({
+    data: {
+      ...parsed.data,
+      expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+    },
+  });
+  res.json(d);
+});
+
+app.put("/api/compliance-docs/:id", authRequired, readOnlyBlocked, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const data: any = { ...req.body };
+  if (data.expiresAt) data.expiresAt = new Date(data.expiresAt);
+  await prisma.complianceDoc.update({ where: { id }, data });
+  res.json({ ok: true });
+});
+
+app.delete("/api/compliance-docs/:id", authRequired, readOnlyBlocked, async (req, res) => {
+  await prisma.complianceDoc.update({
+    where: { id: parseInt(req.params.id, 10) },
+    data: { isArchived: true },
+  });
+  res.json({ ok: true });
+});
+
+/* ===================== CONTACTS (M14 — portability) ===================== */
+app.get("/api/contacts", authRequired, async (req, res) => {
+  const { search, customerId } = req.query as Record<string, string>;
+  const where: any = { isArchived: false };
+  if (customerId) where.currentCustomerId = parseInt(customerId, 10);
+  if (search) {
+    where.OR = [
+      { fullName: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+    ];
+  }
+  const rows = await prisma.contact.findMany({
+    where,
+    include: {
+      currentCustomer: { select: { id: true, companyName: true } },
+      employmentHistory: { orderBy: { startedAt: "desc" } },
+    },
+    orderBy: { fullName: "asc" },
+  });
+  res.json(rows);
+});
+
+app.post("/api/contacts", authRequired, readOnlyBlocked, async (req, res) => {
+  const schema = z.object({
+    fullName: z.string().min(1),
+    email: z.string().email().nullable().optional(),
+    phone: z.string().nullable().optional(),
+    title: z.string().nullable().optional(),
+    currentCustomerId: z.number().int().nullable().optional(),
+    notes: z.string().nullable().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+  const c = await prisma.contact.create({ data: parsed.data });
+  // also seed first employment record if assigned to a customer
+  if (parsed.data.currentCustomerId) {
+    const cust = await prisma.customer.findUnique({ where: { id: parsed.data.currentCustomerId } });
+    if (cust) {
+      await prisma.contactEmployment.create({
+        data: {
+          contactId: c.id,
+          customerId: cust.id,
+          customerName: cust.companyName,
+          title: parsed.data.title || null,
+          startedAt: new Date(),
+        },
+      });
+    }
+  }
+  res.json(c);
+});
+
+app.put("/api/contacts/:id", authRequired, readOnlyBlocked, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const prior = await prisma.contact.findUnique({ where: { id }, include: { employmentHistory: { orderBy: { startedAt: "desc" }, take: 1 } } });
+  if (!prior) return res.status(404).json({ error: "Not found" });
+  const data: any = req.body;
+  await prisma.contact.update({ where: { id }, data });
+
+  // Contact portability: if currentCustomerId changed, close the prior employment
+  // record and open a new one — preserves history.
+  if (data.currentCustomerId !== undefined && data.currentCustomerId !== prior.currentCustomerId) {
+    const open = prior.employmentHistory.find((e) => !e.endedAt);
+    if (open) {
+      await prisma.contactEmployment.update({
+        where: { id: open.id },
+        data: { endedAt: new Date() },
+      });
+    }
+    if (data.currentCustomerId) {
+      const cust = await prisma.customer.findUnique({ where: { id: data.currentCustomerId } });
+      if (cust) {
+        await prisma.contactEmployment.create({
+          data: {
+            contactId: id,
+            customerId: cust.id,
+            customerName: cust.companyName,
+            title: data.title || null,
+            startedAt: new Date(),
+          },
+        });
+      }
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/contacts/:id", authRequired, readOnlyBlocked, async (req, res) => {
+  await prisma.contact.update({
+    where: { id: parseInt(req.params.id, 10) },
+    data: { isArchived: true },
+  });
+  res.json({ ok: true });
+});
+
+/* ===================== CUSTOMER SMART SUMMARY (M13) ===================== */
+app.get("/api/customers/:id/summary", authRequired, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const c = await prisma.customer.findUnique({
+    where: { id },
+    include: { owner: { select: { id: true, fullName: true } } },
+  });
+  if (!c) return res.status(404).json({ error: "Not found" });
+  const ops = await prisma.opportunity.findMany({
+    where: { isArchived: false, OR: [{ customerId: id }, { customerName: c.companyName }] },
+    orderBy: { createdAt: "desc" },
+  });
+  const won = ops.filter((o) => o.stage === "WON");
+  const lost = ops.filter((o) => o.stage === "LOST");
+  const open = ops.filter(
+    (o) => !["WON", "LOST", "NO_BID", "WITHDRAWN"].includes(o.stage)
+  );
+  const wonRev = won.reduce((a, o) => a + Number(o.actualValueCents ?? o.estimatedValueCents), 0);
+  const openVal = open.reduce((a, o) => a + Number(o.estimatedValueCents), 0);
+  const winRate = won.length + lost.length === 0 ? null : won.length / (won.length + lost.length);
+  const lastTouchedNote = await prisma.opportunityNote.findFirst({
+    where: { opportunity: { OR: [{ customerId: id }, { customerName: c.companyName }] } },
+    orderBy: { createdAt: "desc" },
+    include: { author: { select: { id: true, fullName: true } }, opportunity: { select: { projectName: true } } },
+  });
+
+  // Compose a templated narrative — no AI required.
+  const parts: string[] = [];
+  parts.push(`${c.tier} tier customer (${c.customerType.replace("_", " ")})`);
+  if (won.length + lost.length > 0) {
+    parts.push(`${won.length} of ${won.length + lost.length} decided bids won (${Math.round((winRate ?? 0) * 100)}%)`);
+  } else {
+    parts.push("no decided bids yet");
+  }
+  if (wonRev > 0) parts.push(`$${(wonRev / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })} lifetime won`);
+  if (open.length > 0) parts.push(`${open.length} open pursuit${open.length === 1 ? "" : "s"} totaling $${(openVal / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
+  if (lastTouchedNote) {
+    const daysAgo = Math.floor((Date.now() - new Date(lastTouchedNote.createdAt).getTime()) / 86_400_000);
+    parts.push(`last touchpoint ${daysAgo} days ago by ${lastTouchedNote.author?.fullName}`);
+  }
+  if (c.lastLook) parts.push("on last-look list");
+
+  res.json({
+    customer: c,
+    summary: parts.join(" · "),
+    counts: { total: ops.length, won: won.length, lost: lost.length, open: open.length },
+    wonRevenueCents: wonRev,
+    openPipelineCents: openVal,
+    winRate,
+    lastTouchedAt: lastTouchedNote?.createdAt ?? null,
+    lastTouchedBy: lastTouchedNote?.author?.fullName ?? null,
+  });
+});
+
+/* ===================== "WHO KNOWS WHO" (M9) ===================== */
+app.get("/api/customers/:id/touchpoints", authRequired, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const c = await prisma.customer.findUnique({ where: { id } });
+  if (!c) return res.status(404).json({ error: "Not found" });
+  const since = new Date();
+  since.setMonth(since.getMonth() - 24);
+  const notes = await prisma.opportunityNote.findMany({
+    where: {
+      createdAt: { gte: since },
+      opportunity: {
+        isArchived: false,
+        OR: [{ customerId: id }, { customerName: c.companyName }],
+      },
+    },
+    include: {
+      author: { select: { id: true, fullName: true, role: true } },
+      opportunity: { select: { id: true, projectName: true, projectNumber: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  // Aggregate by author
+  const byAuthor: Record<number, any> = {};
+  for (const n of notes) {
+    if (!n.author) continue;
+    const a = byAuthor[n.author.id] || {
+      id: n.author.id,
+      fullName: n.author.fullName,
+      role: n.author.role,
+      count: 0,
+      lastAt: n.createdAt,
+      projects: new Set<string>(),
+    };
+    a.count++;
+    if (n.createdAt > a.lastAt) a.lastAt = n.createdAt;
+    a.projects.add(n.opportunity.projectName);
+    byAuthor[n.author.id] = a;
+  }
+  const summary = Object.values(byAuthor)
+    .map((a: any) => ({ ...a, projects: Array.from(a.projects) }))
+    .sort((a: any, b: any) => b.lastAt.getTime() - a.lastAt.getTime());
+  res.json({
+    summary,
+    recentNotes: notes.slice(0, 20).map((n) => ({
+      id: n.id,
+      body: n.body,
+      createdAt: n.createdAt,
+      author: n.author,
+      opportunityId: n.opportunity.id,
+      opportunityName: n.opportunity.projectName,
+    })),
   });
 });
 
