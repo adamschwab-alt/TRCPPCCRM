@@ -20,7 +20,15 @@ import { sendEmail, inviteEmail, resetEmail } from "./email";
 import { validatePassword } from "./policy";
 import { audit } from "./audit";
 import { generateSecret, provisioningQR, verifyTotp } from "./totp";
-import { previewHeavyBidImport, commitHeavyBidImport, previewSage300Import, commitSage300Import } from "./integrations";
+import {
+  previewHeavyBidImport, commitHeavyBidImport,
+  previewSage300Import, commitSage300Import,
+  generateTemplate, BulkEntity,
+  previewPipelineImport, commitPipelineImport,
+  previewCustomersImport, commitCustomersImport,
+  previewContactsImport, commitContactsImport,
+  previewComplianceImport, commitComplianceImport,
+} from "./integrations";
 import { streamWorkbook, streamCSV } from "./exports";
 
 const MAX_FAILED_LOGINS = 5;
@@ -2157,6 +2165,54 @@ app.post("/api/integrations/sage300/import", authRequired, requireRole("ADMIN", 
   if (!csv) return res.status(400).json({ error: "Provide csv body" });
   const result = await commitSage300Import(csv, req.user!.id, fileName);
   await audit({ event: "settings.updated", userId: req.user!.id, actorLabel: req.user!.username, req, meta: { kind: "sage300_import", ...result } });
+  res.json(result);
+});
+
+/* ----- BULK DATA LOAD (templates + generic importers) ----- */
+
+const BULK_ENTITIES = ["pipeline", "customers", "contacts", "compliance"] as const;
+type BulkE = (typeof BULK_ENTITIES)[number];
+
+app.get("/api/integrations/template/:entity", authRequired, async (req, res) => {
+  const e = req.params.entity as BulkE;
+  if (!BULK_ENTITIES.includes(e)) return res.status(404).json({ error: "Unknown entity" });
+  const t = generateTemplate(e as BulkEntity);
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="${t.filename}"`);
+  res.send(t.csv);
+});
+
+async function previewByEntity(entity: BulkE, csv: string) {
+  if (entity === "pipeline") return previewPipelineImport(csv);
+  if (entity === "customers") return previewCustomersImport(csv);
+  if (entity === "contacts") return previewContactsImport(csv);
+  if (entity === "compliance") return previewComplianceImport(csv);
+  throw new Error("Unknown entity");
+}
+async function commitByEntity(entity: BulkE, csv: string, userId: number, fileName?: string) {
+  if (entity === "pipeline") return commitPipelineImport(csv, userId, fileName);
+  if (entity === "customers") return commitCustomersImport(csv, userId, fileName);
+  if (entity === "contacts") return commitContactsImport(csv, userId, fileName);
+  if (entity === "compliance") return commitComplianceImport(csv, userId, fileName);
+  throw new Error("Unknown entity");
+}
+
+app.post("/api/integrations/bulk/:entity/preview", authRequired, async (req, res) => {
+  const e = req.params.entity as BulkE;
+  if (!BULK_ENTITIES.includes(e)) return res.status(404).json({ error: "Unknown entity" });
+  const { csv } = req.body as { csv: string };
+  if (!csv) return res.status(400).json({ error: "Provide csv body" });
+  const result = await previewByEntity(e, csv);
+  res.json(result);
+});
+
+app.post("/api/integrations/bulk/:entity/import", authRequired, readOnlyBlocked, async (req: AuthRequest, res) => {
+  const e = req.params.entity as BulkE;
+  if (!BULK_ENTITIES.includes(e)) return res.status(404).json({ error: "Unknown entity" });
+  const { csv, fileName } = req.body as { csv: string; fileName?: string };
+  if (!csv) return res.status(400).json({ error: "Provide csv body" });
+  const result = await commitByEntity(e, csv, req.user!.id, fileName);
+  await audit({ event: "settings.updated", userId: req.user!.id, actorLabel: req.user!.username, req, meta: { kind: `bulk_${e}_import`, ...result } });
   res.json(result);
 });
 

@@ -16,6 +16,44 @@ const pick = (r: Row, ...keys: string[]) => {
   return "";
 };
 
+const truthy = (v: string) => /^(y|yes|true|1|t)$/i.test(v.trim());
+
+function mapStage(status: string | undefined): string | null {
+  if (!status) return null;
+  const s = status.toLowerCase().replace(/[-_\s]+/g, "");
+  if (/won|awarded/.test(s)) return "WON";
+  if (/lost/.test(s)) return "LOST";
+  if (/nobid/.test(s)) return "NO_BID";
+  if (/withdrawn|cancel/.test(s)) return "WITHDRAWN";
+  if (/awaiting|pending/.test(s)) return "AWAITING_DECISION";
+  if (/submitted/.test(s)) return "BID_SUBMITTED";
+  if (/estimat/.test(s)) return "ESTIMATING";
+  if (/gonogo|going/.test(s)) return "GO_NO_GO";
+  if (/review|itb/.test(s)) return "REVIEWING_ITB";
+  if (/lead/.test(s)) return "LEAD";
+  return null;
+}
+
+function mapCustomerType(s: string | undefined): string | null {
+  if (!s) return null;
+  const v = s.toLowerCase();
+  if (/gc|general\s*contractor/.test(v)) return "GC";
+  if (/developer/.test(v)) return "DEVELOPER";
+  if (/gov/.test(v)) return "GOVERNMENT";
+  if (/owner|direct/.test(v)) return "OWNER_DIRECT";
+  return null;
+}
+
+function mapTier(s: string | undefined): string | null {
+  if (!s) return null;
+  const v = s.toLowerCase();
+  if (/platinum/.test(v)) return "PLATINUM";
+  if (/gold/.test(v)) return "GOLD";
+  if (/silver/.test(v)) return "SILVER";
+  if (/new/.test(v)) return "NEW";
+  return null;
+}
+
 /* ----------------- HEAVYBID ----------------- */
 // Expected CSV columns (loose — many HeavyBid Bid Summary exports vary):
 //   Job # / Job Number / Bid #
@@ -78,19 +116,7 @@ export async function previewHeavyBidImport(csv: string) {
   return { totalRows: parsed.rows.length, matched, newRows, errors };
 }
 
-function mapHeavyBidStage(status: string | undefined): string | null {
-  if (!status) return null;
-  const s = status.toLowerCase();
-  if (/won|awarded|active$/.test(s)) return "WON";
-  if (/lost/.test(s)) return "LOST";
-  if (/no\s*bid|nobid/.test(s)) return "NO_BID";
-  if (/withdrawn|cancel/.test(s)) return "WITHDRAWN";
-  if (/awaiting|pending|submitted/.test(s)) return "BID_SUBMITTED";
-  if (/estimat/.test(s)) return "ESTIMATING";
-  if (/review|itb/.test(s)) return "REVIEWING_ITB";
-  if (/lead/.test(s)) return "LEAD";
-  return null;
-}
+const mapHeavyBidStage = mapStage;
 
 export async function commitHeavyBidImport(csv: string, actorUserId: number, fileName?: string) {
   const parsed = parseCSV(csv);
@@ -368,4 +394,554 @@ export async function commitSage300Import(csv: string, actorUserId: number, file
     },
   });
   return { id: rec.id, totalRows: parsed.rows.length, created, updated, skipped, errors };
+}
+
+/* ===================== BULK DATA LOAD (generic templates) =====================
+ * Pre-built CSV templates per entity for one-time historical data backfill.
+ * Templates intentionally accept flexible headers so users can paste from
+ * their own spreadsheets without reformatting.
+ */
+
+const FORMATS = {
+  pipeline: {
+    filename: "redland-pipeline-template.csv",
+    headers: [
+      "Project Name",            // required
+      "Customer Name",           // required
+      "Customer Type",           // GC | Developer | Government | Owner-Direct
+      "Project Type",
+      "Region",
+      "Estimated Value",         // dollars
+      "Bid Margin %",
+      "Expected Margin %",
+      "Bid Due Date",            // YYYY-MM-DD
+      "Estimated Start Date",
+      "Duration (months)",
+      "Stage",                   // Lead / Reviewing ITB / Go-No-Go / Estimating / Bid Submitted / Awaiting Decision / Won / Lost / No Bid / Withdrawn
+      "Bonding Required",        // Y/N
+      "Bond Amount",
+      "Estimator",               // user full name or username
+      "PM",
+      "Source",
+      "Competitive",             // Y/N
+      "Last Look",               // Y/N
+      "Actual Value",            // when Stage = Won
+      "Winning Bidder",          // when Stage = Lost
+      "Winning Bid Amount",      // when Stage = Lost
+      "Loss Reason",
+      "No-Bid Reason",
+      "HeavyBid Job #",
+      "Sage Job #",
+      "Pipeline Board",          // main / public / negotiated / private
+      "Notes",                   // creates an initial note
+    ],
+    example: [
+      "Coral Gables Mixed-Use Phase 2",
+      "Suffolk Construction",
+      "GC",
+      "Mixed Use",
+      "SE Florida",
+      "4250000",
+      "6",
+      "8",
+      "2026-06-15",
+      "2026-09-01",
+      "12",
+      "Estimating",
+      "N",
+      "",
+      "David Merring",
+      "",
+      "Repeat Customer",
+      "Y",
+      "Y",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "main",
+      "Pulled from Q1 2026 tracking sheet",
+    ],
+  },
+  customers: {
+    filename: "redland-customers-template.csv",
+    headers: [
+      "Company Name",            // required
+      "Customer Type",           // GC | Developer | Government | Owner-Direct
+      "Tier",                    // Platinum | Gold | Silver | New
+      "Primary Contact",
+      "Phone",
+      "Email",
+      "Last Look",               // Y/N
+      "Notes",
+    ],
+    example: ["Suffolk Construction", "GC", "Platinum", "John Roberts", "555-123-4567", "jroberts@suffolk.com", "Y", "Repeat customer since 2018"],
+  },
+  contacts: {
+    filename: "redland-contacts-template.csv",
+    headers: [
+      "Full Name",               // required
+      "Title",
+      "Email",
+      "Phone",
+      "Current Employer",        // matches a Customer by company name (case-insensitive)
+      "Notes",
+    ],
+    example: ["John Roberts", "Pre-Construction Manager", "jroberts@suffolk.com", "555-123-4567", "Suffolk Construction", "Decision maker on negotiated work"],
+  },
+  compliance: {
+    filename: "redland-compliance-template.csv",
+    headers: [
+      "Type",                    // COI | W9 | LICENSE | MBE | WBE | DBE | OTHER
+      "Label",
+      "Customer",                // optional; matches Customer by company name
+      "Expires",                 // YYYY-MM-DD
+      "Notes",
+    ],
+    example: ["COI", "General Liability 2026", "Suffolk Construction", "2026-12-31", "$5M aggregate"],
+  },
+} as const;
+
+export type BulkEntity = keyof typeof FORMATS;
+
+export function generateTemplate(entity: BulkEntity): { filename: string; csv: string } {
+  const fmt = FORMATS[entity];
+  const esc = (v: string) => {
+    if (!v) return "";
+    if (v.includes(",") || v.includes('"') || v.includes("\n")) return `"${v.replace(/"/g, '""')}"`;
+    return v;
+  };
+  const lines = [fmt.headers.map(esc).join(","), fmt.example.map(esc).join(",")];
+  return { filename: fmt.filename, csv: lines.join("\n") + "\n" };
+}
+
+/* ----- Pipeline bulk import ----- */
+export async function previewPipelineImport(csv: string) {
+  const parsed = parseCSV(csv);
+  const matched: any[] = [];
+  const newRows: any[] = [];
+  const errors: { row: number; reason: string }[] = [];
+  const unknownCustomers = new Set<string>();
+  const unknownEstimators = new Set<string>();
+
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const projectName = pick(r, "project_name", "project", "job_name", "name");
+    const customerName = pick(r, "customer_name", "customer", "owner", "client");
+    const hbJob = pick(r, "heavybid_job", "hb_job", "heavy_bid_job");
+    const sageJob = pick(r, "sage_job", "sage_300_job", "sage300_job");
+
+    if (!projectName) { errors.push({ row: i + 2, reason: "Missing Project Name" }); continue; }
+    if (!customerName) { errors.push({ row: i + 2, reason: "Missing Customer Name" }); continue; }
+
+    // match
+    let existing = null as any;
+    if (hbJob) existing = await prisma.opportunity.findFirst({ where: { heavyBidJobNumber: hbJob } });
+    if (!existing && sageJob) existing = await prisma.opportunity.findFirst({ where: { sage300JobNumber: sageJob } });
+    if (!existing) existing = await prisma.opportunity.findFirst({
+      where: { projectName: { equals: projectName, mode: "insensitive" }, customerName: { equals: customerName, mode: "insensitive" } },
+    });
+    if (!existing) existing = await prisma.opportunity.findFirst({ where: { projectName: { equals: projectName, mode: "insensitive" } } });
+
+    // check estimator
+    const estimatorName = pick(r, "estimator", "estimator_name");
+    if (estimatorName) {
+      const u = await prisma.user.findFirst({
+        where: { isArchived: false, OR: [{ fullName: { contains: estimatorName, mode: "insensitive" } }, { username: estimatorName.toLowerCase() }] },
+      });
+      if (!u) unknownEstimators.add(estimatorName);
+    }
+
+    // check customer
+    const c = await prisma.customer.findFirst({ where: { companyName: { equals: customerName, mode: "insensitive" } } });
+    if (!c) unknownCustomers.add(customerName);
+
+    const value = parseMoney(pick(r, "estimated_value", "value", "bid_total", "contract_amount"));
+    const summary = {
+      rowIndex: i + 2,
+      projectName,
+      customerName,
+      estimatedValueCents: value?.toString() ?? null,
+      stage: mapStage(pick(r, "stage", "status")) || "LEAD",
+      bidDueDate: parseDate(pick(r, "bid_due_date", "bid_due", "due_date"))?.toISOString() ?? null,
+      matchedOpportunityId: existing?.id ?? null,
+      matchedOpportunityName: existing?.projectName ?? null,
+    };
+    if (existing) matched.push(summary);
+    else newRows.push(summary);
+  }
+  return {
+    totalRows: parsed.rows.length,
+    matched,
+    newRows,
+    errors,
+    unknownCustomers: Array.from(unknownCustomers),
+    unknownEstimators: Array.from(unknownEstimators),
+  };
+}
+
+export async function commitPipelineImport(csv: string, actorUserId: number, fileName?: string) {
+  const parsed = parseCSV(csv);
+  let created = 0, updated = 0, skipped = 0;
+  const errors: { row: number; reason: string }[] = [];
+
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const projectName = pick(r, "project_name", "project", "job_name", "name");
+    const customerName = pick(r, "customer_name", "customer", "owner", "client");
+    if (!projectName || !customerName) {
+      errors.push({ row: i + 2, reason: "Missing project or customer name" });
+      skipped++;
+      continue;
+    }
+
+    // resolve linked records
+    const estimatorName = pick(r, "estimator", "estimator_name");
+    let estimatorId: number | null = null;
+    if (estimatorName) {
+      const u = await prisma.user.findFirst({
+        where: { isArchived: false, OR: [{ fullName: { contains: estimatorName, mode: "insensitive" } }, { username: estimatorName.toLowerCase() }] },
+      });
+      if (u) estimatorId = u.id;
+    }
+    const pmName = pick(r, "pm", "project_manager");
+    let pmId: number | null = null;
+    if (pmName) {
+      const u = await prisma.user.findFirst({
+        where: { isArchived: false, OR: [{ fullName: { contains: pmName, mode: "insensitive" } }, { username: pmName.toLowerCase() }] },
+      });
+      if (u) pmId = u.id;
+    }
+    let customerId: number | null = null;
+    const cust = await prisma.customer.findFirst({ where: { companyName: { equals: customerName, mode: "insensitive" } } });
+    if (cust) customerId = cust.id;
+
+    const hbJob = pick(r, "heavybid_job", "hb_job", "heavy_bid_job") || null;
+    const sageJob = pick(r, "sage_job", "sage_300_job", "sage300_job") || null;
+    const stage = mapStage(pick(r, "stage", "status")) || "LEAD";
+    const valueCents = parseMoney(pick(r, "estimated_value", "value", "bid_total", "contract_amount")) ?? 0n;
+    const actualCents = parseMoney(pick(r, "actual_value", "won_amount"));
+    const winningBidCents = parseMoney(pick(r, "winning_bid_amount", "winning_bid"));
+    const bondCents = parseMoney(pick(r, "bond_amount"));
+    const bonding = truthy(pick(r, "bonding_required", "bonding"));
+    const competitive = pick(r, "competitive") === "" ? true : truthy(pick(r, "competitive"));
+    const lastLook = truthy(pick(r, "last_look"));
+    const bidMarginPct = parsePct(pick(r, "bid_margin_%", "bid_margin")) ?? 6;
+    const expectedMarginPct = parsePct(pick(r, "expected_margin_%", "expected_margin"));
+    const duration = pick(r, "duration_months", "duration_months_", "duration");
+
+    // match
+    let existing = null as any;
+    if (hbJob) existing = await prisma.opportunity.findFirst({ where: { heavyBidJobNumber: hbJob } });
+    if (!existing && sageJob) existing = await prisma.opportunity.findFirst({ where: { sage300JobNumber: sageJob } });
+    if (!existing) existing = await prisma.opportunity.findFirst({
+      where: { projectName: { equals: projectName, mode: "insensitive" }, customerName: { equals: customerName, mode: "insensitive" } },
+    });
+    if (!existing) existing = await prisma.opportunity.findFirst({ where: { projectName: { equals: projectName, mode: "insensitive" } } });
+
+    const baseData: any = {
+      projectName,
+      customerName,
+      customerId: customerId,
+      customerType: mapCustomerType(pick(r, "customer_type")) || "GC",
+      projectType: pick(r, "project_type", "type") || "",
+      region: pick(r, "region", "location") || "",
+      estimatedValueCents: valueCents,
+      actualValueCents: actualCents,
+      winningBidCents,
+      winningBidder: pick(r, "winning_bidder") || null,
+      bidMarginPct,
+      expectedMarginPct,
+      bidDueDate: parseDate(pick(r, "bid_due_date", "bid_due", "due_date")),
+      estimatedStartDate: parseDate(pick(r, "estimated_start_date", "start_date")),
+      estimatedDurationMonths: duration && !isNaN(parseInt(duration, 10)) ? parseInt(duration, 10) : null,
+      bondingRequired: bonding,
+      bondAmountCents: bondCents,
+      estimatorId,
+      pmId,
+      source: pick(r, "source") || null,
+      competitive,
+      lastLook,
+      lossReason: pick(r, "loss_reason") || null,
+      noBidReason: pick(r, "no_bid_reason") || null,
+      heavyBidJobNumber: hbJob,
+      sage300JobNumber: sageJob,
+      pipelineBoard: pick(r, "pipeline_board", "board") || "main",
+      stage,
+      stageChangedAt: new Date(),
+      lastActivityAt: new Date(),
+      updatedById: actorUserId,
+    };
+    if (["WON", "LOST", "NO_BID", "WITHDRAWN"].includes(stage) && !existing?.decidedAt) {
+      baseData.decidedAt = new Date();
+    }
+    if (stage === "BID_SUBMITTED" && !existing?.bidSubmittedAt) {
+      baseData.bidSubmittedAt = new Date();
+    }
+
+    try {
+      let opId: number;
+      if (existing) {
+        const u = await prisma.opportunity.update({ where: { id: existing.id }, data: baseData });
+        opId = u.id;
+        updated++;
+      } else {
+        // generate project number
+        const year = new Date().getFullYear();
+        const last = await prisma.opportunity.findFirst({
+          where: { projectNumber: { startsWith: `TRC-${year}-` } },
+          orderBy: { projectNumber: "desc" },
+        });
+        let n = 1;
+        if (last) n = parseInt(last.projectNumber.split("-")[2], 10) + 1;
+        const c = await prisma.opportunity.create({
+          data: { ...baseData, projectNumber: `TRC-${year}-${String(n).padStart(4, "0")}`, createdById: actorUserId },
+        });
+        opId = c.id;
+        created++;
+      }
+      // optional initial note
+      const notes = pick(r, "notes", "comments", "note");
+      if (notes) {
+        await prisma.opportunityNote.create({ data: { opportunityId: opId, authorId: actorUserId, body: notes } });
+      }
+    } catch (e: any) {
+      errors.push({ row: i + 2, reason: e.message || "DB write failed" });
+      skipped++;
+    }
+  }
+
+  const rec = await prisma.integrationImport.create({
+    data: {
+      source: "BULK_PIPELINE",
+      fileName: fileName || null,
+      importedBy: actorUserId,
+      rowCount: parsed.rows.length,
+      createdCount: created,
+      updatedCount: updated,
+      skippedCount: skipped,
+      errorCount: errors.length,
+      errorsJson: errors.length ? JSON.stringify(errors) : null,
+    },
+  });
+  return { id: rec.id, totalRows: parsed.rows.length, created, updated, skipped, errors };
+}
+
+/* ----- Customers bulk import ----- */
+export async function previewCustomersImport(csv: string) {
+  const parsed = parseCSV(csv);
+  const matched: any[] = [];
+  const newRows: any[] = [];
+  const errors: { row: number; reason: string }[] = [];
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const companyName = pick(r, "company_name", "company", "customer", "name");
+    if (!companyName) { errors.push({ row: i + 2, reason: "Missing Company Name" }); continue; }
+    const existing = await prisma.customer.findFirst({ where: { companyName: { equals: companyName, mode: "insensitive" } } });
+    const summary = {
+      rowIndex: i + 2,
+      companyName,
+      customerType: mapCustomerType(pick(r, "customer_type", "type")),
+      tier: mapTier(pick(r, "tier")),
+      matchedCustomerId: existing?.id ?? null,
+    };
+    if (existing) matched.push(summary);
+    else newRows.push(summary);
+  }
+  return { totalRows: parsed.rows.length, matched, newRows, errors };
+}
+
+export async function commitCustomersImport(csv: string, actorUserId: number, fileName?: string) {
+  const parsed = parseCSV(csv);
+  let created = 0, updated = 0, skipped = 0;
+  const errors: { row: number; reason: string }[] = [];
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const companyName = pick(r, "company_name", "company", "customer", "name");
+    if (!companyName) { errors.push({ row: i + 2, reason: "Missing Company Name" }); skipped++; continue; }
+    const data: any = {
+      companyName,
+      primaryContact: pick(r, "primary_contact", "contact") || null,
+      phone: pick(r, "phone") || null,
+      email: pick(r, "email") || null,
+      customerType: mapCustomerType(pick(r, "customer_type", "type")) || "GC",
+      tier: mapTier(pick(r, "tier")) || "NEW",
+      lastLook: truthy(pick(r, "last_look")),
+      notes: pick(r, "notes") || null,
+    };
+    try {
+      const existing = await prisma.customer.findFirst({ where: { companyName: { equals: companyName, mode: "insensitive" } } });
+      if (existing) {
+        await prisma.customer.update({ where: { id: existing.id }, data: { ...data, updatedById: actorUserId } });
+        updated++;
+      } else {
+        await prisma.customer.create({ data: { ...data, createdById: actorUserId, updatedById: actorUserId } });
+        created++;
+      }
+    } catch (e: any) {
+      errors.push({ row: i + 2, reason: e.message || "DB write failed" });
+      skipped++;
+    }
+  }
+  const rec = await prisma.integrationImport.create({
+    data: { source: "BULK_CUSTOMERS", fileName: fileName || null, importedBy: actorUserId, rowCount: parsed.rows.length, createdCount: created, updatedCount: updated, skippedCount: skipped, errorCount: errors.length, errorsJson: errors.length ? JSON.stringify(errors) : null },
+  });
+  return { id: rec.id, totalRows: parsed.rows.length, created, updated, skipped, errors };
+}
+
+/* ----- Contacts bulk import ----- */
+export async function previewContactsImport(csv: string) {
+  const parsed = parseCSV(csv);
+  const matched: any[] = [];
+  const newRows: any[] = [];
+  const errors: { row: number; reason: string }[] = [];
+  const unknownCustomers = new Set<string>();
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const fullName = pick(r, "full_name", "name", "contact_name");
+    if (!fullName) { errors.push({ row: i + 2, reason: "Missing Full Name" }); continue; }
+    const email = pick(r, "email");
+    const employer = pick(r, "current_employer", "employer", "company");
+    if (employer) {
+      const c = await prisma.customer.findFirst({ where: { companyName: { equals: employer, mode: "insensitive" } } });
+      if (!c) unknownCustomers.add(employer);
+    }
+    let existing = null as any;
+    if (email) existing = await prisma.contact.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
+    if (!existing && employer) {
+      const cust = await prisma.customer.findFirst({ where: { companyName: { equals: employer, mode: "insensitive" } } });
+      if (cust) existing = await prisma.contact.findFirst({ where: { fullName: { equals: fullName, mode: "insensitive" }, currentCustomerId: cust.id } });
+    }
+    if (!existing) existing = await prisma.contact.findFirst({ where: { fullName: { equals: fullName, mode: "insensitive" } } });
+    const summary = { rowIndex: i + 2, fullName, email, employer, matchedContactId: existing?.id ?? null };
+    if (existing) matched.push(summary);
+    else newRows.push(summary);
+  }
+  return { totalRows: parsed.rows.length, matched, newRows, errors, unknownCustomers: Array.from(unknownCustomers) };
+}
+
+export async function commitContactsImport(csv: string, actorUserId: number, fileName?: string) {
+  const parsed = parseCSV(csv);
+  let created = 0, updated = 0, skipped = 0;
+  const errors: { row: number; reason: string }[] = [];
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const fullName = pick(r, "full_name", "name", "contact_name");
+    if (!fullName) { errors.push({ row: i + 2, reason: "Missing Full Name" }); skipped++; continue; }
+    const email = pick(r, "email") || null;
+    const phone = pick(r, "phone") || null;
+    const title = pick(r, "title") || null;
+    const notes = pick(r, "notes") || null;
+    const employer = pick(r, "current_employer", "employer", "company");
+    let currentCustomerId: number | null = null;
+    let employerCust: any = null;
+    if (employer) {
+      employerCust = await prisma.customer.findFirst({ where: { companyName: { equals: employer, mode: "insensitive" } } });
+      if (employerCust) currentCustomerId = employerCust.id;
+    }
+    try {
+      let existing = null as any;
+      if (email) existing = await prisma.contact.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
+      if (!existing && employerCust) existing = await prisma.contact.findFirst({ where: { fullName: { equals: fullName, mode: "insensitive" }, currentCustomerId: employerCust.id } });
+      if (!existing) existing = await prisma.contact.findFirst({ where: { fullName: { equals: fullName, mode: "insensitive" } } });
+
+      if (existing) {
+        const data: any = { title, email, phone, notes };
+        if (currentCustomerId !== null) data.currentCustomerId = currentCustomerId;
+        await prisma.contact.update({ where: { id: existing.id }, data });
+        updated++;
+      } else {
+        const c = await prisma.contact.create({
+          data: { fullName, title, email, phone, notes, currentCustomerId },
+        });
+        if (currentCustomerId && employerCust) {
+          await prisma.contactEmployment.create({
+            data: { contactId: c.id, customerId: currentCustomerId, customerName: employerCust.companyName, title, startedAt: new Date() },
+          });
+        }
+        created++;
+      }
+    } catch (e: any) {
+      errors.push({ row: i + 2, reason: e.message || "DB write failed" });
+      skipped++;
+    }
+  }
+  const rec = await prisma.integrationImport.create({
+    data: { source: "BULK_CONTACTS", fileName: fileName || null, importedBy: actorUserId, rowCount: parsed.rows.length, createdCount: created, updatedCount: updated, skippedCount: skipped, errorCount: errors.length, errorsJson: errors.length ? JSON.stringify(errors) : null },
+  });
+  return { id: rec.id, totalRows: parsed.rows.length, created, updated, skipped, errors };
+}
+
+/* ----- Compliance bulk import ----- */
+export async function previewComplianceImport(csv: string) {
+  const parsed = parseCSV(csv);
+  const newRows: any[] = [];
+  const errors: { row: number; reason: string }[] = [];
+  const unknownCustomers = new Set<string>();
+  const ALLOWED = ["COI", "W9", "LICENSE", "MBE", "WBE", "DBE", "OTHER"];
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const docType = pick(r, "type", "doc_type").toUpperCase();
+    if (!ALLOWED.includes(docType)) {
+      errors.push({ row: i + 2, reason: `Type must be one of: ${ALLOWED.join(", ")}` });
+      continue;
+    }
+    const cust = pick(r, "customer", "company");
+    if (cust) {
+      const c = await prisma.customer.findFirst({ where: { companyName: { equals: cust, mode: "insensitive" } } });
+      if (!c) unknownCustomers.add(cust);
+    }
+    newRows.push({
+      rowIndex: i + 2,
+      docType,
+      label: pick(r, "label") || null,
+      customerName: cust || null,
+      expiresAt: parseDate(pick(r, "expires", "expiration", "expires_at"))?.toISOString() ?? null,
+    });
+  }
+  return { totalRows: parsed.rows.length, matched: [], newRows, errors, unknownCustomers: Array.from(unknownCustomers) };
+}
+
+export async function commitComplianceImport(csv: string, actorUserId: number, fileName?: string) {
+  const parsed = parseCSV(csv);
+  let created = 0, skipped = 0;
+  const errors: { row: number; reason: string }[] = [];
+  const ALLOWED = ["COI", "W9", "LICENSE", "MBE", "WBE", "DBE", "OTHER"];
+  for (let i = 0; i < parsed.rows.length; i++) {
+    const r = parsed.rows[i];
+    const docType = pick(r, "type", "doc_type").toUpperCase();
+    if (!ALLOWED.includes(docType)) {
+      errors.push({ row: i + 2, reason: `Type must be one of: ${ALLOWED.join(", ")}` });
+      skipped++;
+      continue;
+    }
+    const cust = pick(r, "customer", "company");
+    let customerId: number | null = null;
+    if (cust) {
+      const c = await prisma.customer.findFirst({ where: { companyName: { equals: cust, mode: "insensitive" } } });
+      if (c) customerId = c.id;
+    }
+    try {
+      await prisma.complianceDoc.create({
+        data: {
+          docType,
+          label: pick(r, "label") || null,
+          customerId,
+          expiresAt: parseDate(pick(r, "expires", "expiration", "expires_at")),
+          notes: pick(r, "notes") || null,
+        },
+      });
+      created++;
+    } catch (e: any) {
+      errors.push({ row: i + 2, reason: e.message || "DB write failed" });
+      skipped++;
+    }
+  }
+  const rec = await prisma.integrationImport.create({
+    data: { source: "BULK_COMPLIANCE", fileName: fileName || null, importedBy: actorUserId, rowCount: parsed.rows.length, createdCount: created, updatedCount: 0, skippedCount: skipped, errorCount: errors.length, errorsJson: errors.length ? JSON.stringify(errors) : null },
+  });
+  return { id: rec.id, totalRows: parsed.rows.length, created, updated: 0, skipped, errors };
 }

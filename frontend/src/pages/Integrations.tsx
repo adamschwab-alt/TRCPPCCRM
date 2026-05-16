@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api, fmtDateTime } from "../api";
 import { useAuth } from "../auth";
 
-type Source = "heavybid" | "sage300";
+type Source = "heavybid" | "sage300" | "bulk-pipeline" | "bulk-customers" | "bulk-contacts" | "bulk-compliance";
 
 const TOKEN_KEY = "redland_token";
 
@@ -47,7 +47,8 @@ export default function Integrations() {
       <div className="grid lg:grid-cols-2 gap-4">
         {canImport && (
           <ImportPanel
-            source="heavybid"
+            previewPath="/api/integrations/heavybid/preview"
+            importPath="/api/integrations/heavybid/import"
             title="HCSS HeavyBid"
             blurb="Upload a HeavyBid Bid Summary CSV. Auto-matches existing opportunities by Job Number, Project Name + Customer, or Project Name. New rows create new opportunities; matched rows update bid total, due date, region, estimator, and stage."
             sampleHeaders={["Job Number", "Project Name", "Owner", "Bid Total", "Bid Due", "Estimator", "Status", "Region"]}
@@ -56,7 +57,8 @@ export default function Integrations() {
         )}
         {canImport && (
           <ImportPanel
-            source="sage300"
+            previewPath="/api/integrations/sage300/preview"
+            importPath="/api/integrations/sage300/import"
             title="Sage 300 CRE"
             blurb="Upload a Sage 300 Job List export. Pulls cost-to-date, billed-to-date, % complete, and computes actual margin against contract — surfaces on Backlog + Opportunity detail."
             sampleHeaders={["Job", "Job Name", "Customer", "Contract Amount", "Cost to Date", "Billed to Date", "Percent Complete", "Status"]}
@@ -64,6 +66,57 @@ export default function Integrations() {
           />
         )}
       </div>
+
+      {canImport && (
+        <div>
+          <h2 className="font-bold text-redland-charcoal mb-1">Bulk data load (initial backfill)</h2>
+          <p className="text-sm text-gray-600 mb-3">
+            Backfill pre-existing data from spreadsheets. Download the template, fill it in, upload it back — preview before committing.
+            Customer and estimator names are matched automatically; unknown ones are surfaced in the preview so you can catch typos before they create duplicates.
+          </p>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <ImportPanel
+              templatePath="/api/integrations/template/pipeline"
+              previewPath="/api/integrations/bulk/pipeline/preview"
+              importPath="/api/integrations/bulk/pipeline/import"
+              title="Pipeline (Bids / Backlog / Wins / Losses)"
+              blurb="Load historical and active opportunities — works for the full pipeline (bids in progress, awaiting decision, won, lost, no-bid). Match priority: HeavyBid Job # → Sage Job # → Project Name + Customer → Project Name."
+              sampleHeaders={["Project Name", "Customer Name", "Estimated Value", "Bid Due Date", "Stage", "Estimator", "Region", "..."]}
+              showUnknownLists
+              onComplete={loadImports}
+            />
+            <ImportPanel
+              templatePath="/api/integrations/template/customers"
+              previewPath="/api/integrations/bulk/customers/preview"
+              importPath="/api/integrations/bulk/customers/import"
+              title="Customers"
+              blurb="Upload your existing customer master list. Matches existing records by Company Name (case-insensitive) and updates them; everything else is created fresh."
+              sampleHeaders={["Company Name", "Customer Type", "Tier", "Primary Contact", "Email", "Phone", "Last Look"]}
+              onComplete={loadImports}
+            />
+            <ImportPanel
+              templatePath="/api/integrations/template/contacts"
+              previewPath="/api/integrations/bulk/contacts/preview"
+              importPath="/api/integrations/bulk/contacts/import"
+              title="Contacts"
+              blurb="Upload your contact list (GC PMs, owner reps, estimators on the other side). Current Employer is matched to an existing Customer by company name — load Customers first if you haven't yet."
+              sampleHeaders={["Full Name", "Title", "Email", "Phone", "Current Employer", "Notes"]}
+              showUnknownLists
+              onComplete={loadImports}
+            />
+            <ImportPanel
+              templatePath="/api/integrations/template/compliance"
+              previewPath="/api/integrations/bulk/compliance/preview"
+              importPath="/api/integrations/bulk/compliance/import"
+              title="Compliance Documents"
+              blurb="Upload your COI / W-9 / license / MBE-WBE-DBE tracker. Type must be one of: COI, W9, LICENSE, MBE, WBE, DBE, OTHER. Customer matching is optional."
+              sampleHeaders={["Type", "Label", "Customer", "Expires", "Notes"]}
+              showUnknownLists
+              onComplete={loadImports}
+            />
+          </div>
+        </div>
+      )}
 
       <div>
         <h2 className="font-bold text-redland-charcoal mb-2">Exports</h2>
@@ -132,11 +185,14 @@ function ExportCard({ title, desc, onClick }: { title: string; desc: string; onC
   );
 }
 
-function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
-  source: Source;
+function ImportPanel({ previewPath, importPath, templatePath, title, blurb, sampleHeaders, showUnknownLists, onComplete }: {
+  previewPath: string;
+  importPath: string;
+  templatePath?: string;
   title: string;
   blurb: string;
   sampleHeaders: string[];
+  showUnknownLists?: boolean;
   onComplete: () => void;
 }) {
   const [csv, setCsv] = useState("");
@@ -158,11 +214,24 @@ function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
     reader.readAsText(f);
   }
 
+  async function downloadTemplate() {
+    if (!templatePath) return;
+    const tok = localStorage.getItem("redland_token");
+    const res = await fetch(templatePath, { headers: { Authorization: `Bearer ${tok}` } });
+    if (!res.ok) { alert("Template download failed"); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function doPreview() {
     if (!csv) return;
     setBusy(true);
     try {
-      const r = await api(`/api/integrations/${source}/preview`, { method: "POST", body: JSON.stringify({ csv }) });
+      const r = await api(previewPath, { method: "POST", body: JSON.stringify({ csv }) });
       setPreview(r);
     } catch (e: any) {
       alert(e.message || "Preview failed");
@@ -176,7 +245,7 @@ function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
     if (!confirm(`Import ${preview?.totalRows || "all"} rows from ${title}?`)) return;
     setBusy(true);
     try {
-      const r = await api<any>(`/api/integrations/${source}/import`, {
+      const r = await api<any>(importPath, {
         method: "POST",
         body: JSON.stringify({ csv, fileName }),
       });
@@ -193,6 +262,10 @@ function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
     }
   }
 
+  function rowLabel(r: any): string {
+    return r.projectName || r.fullName || r.companyName || r.label || `Row ${r.rowIndex}`;
+  }
+
   return (
     <div className="card p-4 space-y-3">
       <div>
@@ -205,13 +278,18 @@ function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
         <div className="text-xs font-mono bg-gray-50 rounded p-2 break-all">{sampleHeaders.join(" · ")}</div>
       </div>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".csv,.tsv,.txt"
-        onChange={(e) => onFile(e.target.files?.[0] || null)}
-        className="text-sm"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.tsv,.txt"
+          onChange={(e) => onFile(e.target.files?.[0] || null)}
+          className="text-sm flex-1"
+        />
+        {templatePath && (
+          <button onClick={downloadTemplate} className="btn-ghost text-xs">⬇ Download template</button>
+        )}
+      </div>
 
       {csv && !preview && !result && (
         <button onClick={doPreview} disabled={busy} className="btn-ghost disabled:opacity-50">
@@ -229,16 +307,28 @@ function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
           {preview.errors.length > 0 && (
             <div className="bg-red-50 border border-red-200 text-red-800 text-xs rounded p-2">
               {preview.errors.length} row(s) had errors:{" "}
-              {preview.errors.slice(0, 3).map((e: any) => `row ${e.row}: ${e.reason}`).join("; ")}
-              {preview.errors.length > 3 && "…"}
+              {preview.errors.slice(0, 5).map((e: any) => `row ${e.row}: ${e.reason}`).join("; ")}
+              {preview.errors.length > 5 && "…"}
+            </div>
+          )}
+          {showUnknownLists && (preview.unknownCustomers?.length > 0 || preview.unknownEstimators?.length > 0) && (
+            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs rounded p-2 space-y-1">
+              <div className="font-bold">⚠ Heads up — these names weren't found in your existing data:</div>
+              {preview.unknownCustomers?.length > 0 && (
+                <div><strong>Unknown customers ({preview.unknownCustomers.length}):</strong> {preview.unknownCustomers.slice(0, 6).join(", ")}{preview.unknownCustomers.length > 6 && "…"}</div>
+              )}
+              {preview.unknownEstimators?.length > 0 && (
+                <div><strong>Unknown estimators ({preview.unknownEstimators.length}):</strong> {preview.unknownEstimators.slice(0, 6).join(", ")}{preview.unknownEstimators.length > 6 && "…"}</div>
+              )}
+              <div className="text-yellow-700 text-[0.7rem]">Catch typos here before committing — otherwise duplicate records will be created.</div>
             </div>
           )}
           <div className="max-h-48 overflow-y-auto text-xs space-y-1">
             {preview.matched.slice(0, 5).map((m: any) => (
-              <div key={m.rowIndex} className="text-green-700">↻ {m.projectName} → matched #{m.matchedOpportunityId}</div>
+              <div key={m.rowIndex} className="text-green-700">↻ {rowLabel(m)} → matched</div>
             ))}
             {preview.newRows.slice(0, 5).map((n: any) => (
-              <div key={n.rowIndex} className="text-redland-charcoal">+ {n.projectName} (new)</div>
+              <div key={n.rowIndex} className="text-redland-charcoal">+ {rowLabel(n)} (new)</div>
             ))}
           </div>
           <div className="flex gap-2">
@@ -252,7 +342,7 @@ function ImportPanel({ source, title, blurb, sampleHeaders, onComplete }: {
 
       {result && (
         <div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded p-3">
-          ✓ Done. {result.created} created, {result.updated} updated, {result.skipped} skipped, {result.errors?.length || 0} errors.
+          ✓ Done. {result.created} created, {result.updated || 0} updated, {result.skipped} skipped, {result.errors?.length || 0} errors.
         </div>
       )}
     </div>
