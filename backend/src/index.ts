@@ -29,6 +29,7 @@ import {
   previewContactsImport, commitContactsImport,
   previewComplianceImport, commitComplianceImport,
 } from "./integrations";
+import { matchCustomer, nextCustomerNumber, normalizeName, backfillCustomerNumbers } from "./customer-match";
 import { streamWorkbook, streamCSV } from "./exports";
 
 const MAX_FAILED_LOGINS = 5;
@@ -1228,7 +1229,10 @@ app.get("/api/customers", authRequired, async (_req, res) => {
   const rows = await prisma.customer.findMany({
     where: { isArchived: false },
     orderBy: { companyName: "asc" },
-    include: { owner: { select: { id: true, fullName: true } } },
+    include: {
+      owner: { select: { id: true, fullName: true } },
+      aliases: { select: { id: true, alias: true } },
+    },
   });
   // augment with computed stats
   const ops = await prisma.opportunity.findMany({
@@ -1305,8 +1309,9 @@ app.post(
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Invalid input" });
+    const customerNumber = await nextCustomerNumber();
     const c = await prisma.customer.create({
-      data: { ...parsed.data, createdById: req.user!.id, updatedById: req.user!.id },
+      data: { ...parsed.data, customerNumber, createdById: req.user!.id, updatedById: req.user!.id },
     });
     res.json(c);
   }
@@ -2030,6 +2035,76 @@ app.delete("/api/contacts/:id", authRequired, readOnlyBlocked, async (req, res) 
 });
 
 /* ===================== CUSTOMER SMART SUMMARY (M13) ===================== */
+/* ===================== CUSTOMER ALIASES + MERGE + LOOKUP ===================== */
+// Aliases: alternate names (typos / suffix variants / "doing business as") for
+// a single customer. Used everywhere customer-name matching happens.
+app.get("/api/customers/:id/aliases", authRequired, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const rows = await prisma.customerAlias.findMany({ where: { customerId: id }, orderBy: { alias: "asc" } });
+  res.json(rows);
+});
+
+app.post("/api/customers/:id/aliases", authRequired, readOnlyBlocked, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const alias = String(req.body?.alias || "").trim();
+  if (!alias) return res.status(400).json({ error: "Alias required" });
+  try {
+    const a = await prisma.customerAlias.create({
+      data: { customerId: id, alias, normalized: normalizeName(alias) },
+    });
+    res.json(a);
+  } catch (e: any) {
+    if (e.code === "P2002") return res.status(409).json({ error: "That alias already exists for this customer" });
+    throw e;
+  }
+});
+
+app.delete("/api/customers/aliases/:aliasId", authRequired, readOnlyBlocked, async (req, res) => {
+  await prisma.customerAlias.delete({ where: { id: parseInt(req.params.aliasId, 10) } });
+  res.json({ ok: true });
+});
+
+// Lookup endpoint used by import preview to resolve unmatched names.
+app.post("/api/customers/lookup", authRequired, async (req, res) => {
+  const { name, customerNumber } = req.body as { name?: string; customerNumber?: string };
+  const result = await matchCustomer(name || "", customerNumber || null);
+  res.json(result);
+});
+
+// Merge two customers — repoints all opportunities + contacts + compliance,
+// copies aliases (and adds the loser's name as an alias on the keeper),
+// then archives the loser. Admin only — irreversible (soft-archive though).
+app.post("/api/customers/:fromId/merge-into/:toId", authRequired, requireRole("ADMIN", "LEADERSHIP"), async (req: AuthRequest, res) => {
+  const fromId = parseInt(req.params.fromId, 10);
+  const toId = parseInt(req.params.toId, 10);
+  if (fromId === toId) return res.status(400).json({ error: "Cannot merge a customer into itself" });
+  const [from, to] = await Promise.all([
+    prisma.customer.findUnique({ where: { id: fromId }, include: { aliases: true } }),
+    prisma.customer.findUnique({ where: { id: toId } }),
+  ]);
+  if (!from || !to) return res.status(404).json({ error: "Customer not found" });
+
+  // Repoint opportunities
+  const opUpdated = await prisma.opportunity.updateMany({ where: { customerId: fromId }, data: { customerId: toId, customerName: to.companyName } });
+  // Repoint contacts
+  const conUpdated = await prisma.contact.updateMany({ where: { currentCustomerId: fromId }, data: { currentCustomerId: toId } });
+  // Repoint compliance
+  await prisma.complianceDoc.updateMany({ where: { customerId: fromId }, data: { customerId: toId } });
+  // Copy aliases (and add the loser's company name as a new alias)
+  const aliasesToAdd = [from.companyName, ...from.aliases.map((a) => a.alias)];
+  for (const a of aliasesToAdd) {
+    try {
+      await prisma.customerAlias.create({
+        data: { customerId: toId, alias: a, normalized: normalizeName(a) },
+      });
+    } catch { /* unique conflict — already an alias of keeper, skip */ }
+  }
+  // Archive the loser
+  await prisma.customer.update({ where: { id: fromId }, data: { isArchived: true } });
+  await audit({ event: "user.deactivated", userId: req.user!.id, actorLabel: req.user!.username, targetType: "customer", targetId: fromId, req, meta: { mergedInto: toId, opportunitiesRepointed: opUpdated.count, contactsRepointed: conUpdated.count } });
+  res.json({ ok: true, opportunitiesRepointed: opUpdated.count, contactsRepointed: conUpdated.count });
+});
+
 app.get("/api/customers/:id/summary", authRequired, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const c = await prisma.customer.findUnique({
@@ -2189,8 +2264,8 @@ async function previewByEntity(entity: BulkE, csv: string) {
   if (entity === "compliance") return previewComplianceImport(csv);
   throw new Error("Unknown entity");
 }
-async function commitByEntity(entity: BulkE, csv: string, userId: number, fileName?: string) {
-  if (entity === "pipeline") return commitPipelineImport(csv, userId, fileName);
+async function commitByEntity(entity: BulkE, csv: string, userId: number, fileName?: string, customerMappings?: Record<string, number>) {
+  if (entity === "pipeline") return commitPipelineImport(csv, userId, fileName, customerMappings);
   if (entity === "customers") return commitCustomersImport(csv, userId, fileName);
   if (entity === "contacts") return commitContactsImport(csv, userId, fileName);
   if (entity === "compliance") return commitComplianceImport(csv, userId, fileName);
@@ -2209,9 +2284,9 @@ app.post("/api/integrations/bulk/:entity/preview", authRequired, async (req, res
 app.post("/api/integrations/bulk/:entity/import", authRequired, readOnlyBlocked, async (req: AuthRequest, res) => {
   const e = req.params.entity as BulkE;
   if (!BULK_ENTITIES.includes(e)) return res.status(404).json({ error: "Unknown entity" });
-  const { csv, fileName } = req.body as { csv: string; fileName?: string };
+  const { csv, fileName, customerMappings } = req.body as { csv: string; fileName?: string; customerMappings?: Record<string, number> };
   if (!csv) return res.status(400).json({ error: "Provide csv body" });
-  const result = await commitByEntity(e, csv, req.user!.id, fileName);
+  const result = await commitByEntity(e, csv, req.user!.id, fileName, customerMappings);
   await audit({ event: "settings.updated", userId: req.user!.id, actorLabel: req.user!.username, req, meta: { kind: `bulk_${e}_import`, ...result } });
   res.json(result);
 });
@@ -2501,6 +2576,12 @@ if (fs.existsSync(STATIC_DIR)) {
 
 /* ===================== START ===================== */
 const PORT = parseInt(process.env.PORT || "4000", 10);
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Redland CRM API listening on :${PORT}`);
+  try {
+    const n = await backfillCustomerNumbers();
+    if (n > 0) console.log(`Backfilled customerNumber on ${n} customer(s).`);
+  } catch (e) {
+    console.error("customerNumber backfill failed:", e);
+  }
 });

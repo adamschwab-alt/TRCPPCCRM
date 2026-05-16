@@ -122,6 +122,7 @@ export interface Note {
 
 export interface Customer {
   id: number;
+  customerNumber?: string | null;
   companyName: string;
   primaryContact?: string | null;
   phone?: string | null;
@@ -131,6 +132,7 @@ export interface Customer {
   lastLook: boolean;
   ownerId?: number | null;
   owner?: { id: number; fullName: string } | null;
+  aliases?: { id: number; alias: string }[];
   notes?: string | null;
   totalProjects: number;
   wonProjects: number;

@@ -5,6 +5,7 @@
 
 import { prisma } from "./db";
 import { parseCSV, parseMoney, parsePct, parseDate } from "./csv";
+import { matchCustomer, normalizeName, nextCustomerNumber } from "./customer-match";
 
 type Row = Record<string, string>;
 
@@ -407,7 +408,8 @@ const FORMATS = {
     filename: "redland-pipeline-template.csv",
     headers: [
       "Project Name",            // required
-      "Customer Name",           // required
+      "Customer Number",         // optional — preferred over Customer Name when present
+      "Customer Name",           // required (used when Customer Number is blank)
       "Customer Type",           // GC | Developer | Government | Owner-Direct
       "Project Type",
       "Region",
@@ -437,6 +439,7 @@ const FORMATS = {
     ],
     example: [
       "Coral Gables Mixed-Use Phase 2",
+      "",
       "Suffolk Construction",
       "GC",
       "Mixed Use",
@@ -469,6 +472,7 @@ const FORMATS = {
   customers: {
     filename: "redland-customers-template.csv",
     headers: [
+      "Customer Number",         // optional — leave blank for new customers; auto-generates as CUS-####
       "Company Name",            // required
       "Customer Type",           // GC | Developer | Government | Owner-Direct
       "Tier",                    // Platinum | Gold | Silver | New
@@ -476,9 +480,10 @@ const FORMATS = {
       "Phone",
       "Email",
       "Last Look",               // Y/N
+      "Aliases",                 // pipe-separated alternate names: e.g. "Suffolk|Suffolk Inc|Suffolk Constr."
       "Notes",
     ],
-    example: ["Suffolk Construction", "GC", "Platinum", "John Roberts", "555-123-4567", "jroberts@suffolk.com", "Y", "Repeat customer since 2018"],
+    example: ["", "Suffolk Construction", "GC", "Platinum", "John Roberts", "555-123-4567", "jroberts@suffolk.com", "Y", "Suffolk|Suffolk Inc|Suffolk Construction Inc", "Repeat customer since 2018"],
   },
   contacts: {
     filename: "redland-contacts-template.csv",
@@ -524,20 +529,23 @@ export async function previewPipelineImport(csv: string) {
   const matched: any[] = [];
   const newRows: any[] = [];
   const errors: { row: number; reason: string }[] = [];
-  const unknownCustomers = new Set<string>();
   const unknownEstimators = new Set<string>();
+  // Per-customer-name resolution result, surfaced for the UI to confirm
+  // mappings before commit.
+  const customerSuggestions: Record<string, any> = {};
 
   for (let i = 0; i < parsed.rows.length; i++) {
     const r = parsed.rows[i];
     const projectName = pick(r, "project_name", "project", "job_name", "name");
     const customerName = pick(r, "customer_name", "customer", "owner", "client");
+    const customerNumber = pick(r, "customer_number", "customer_no", "cus_number", "cus");
     const hbJob = pick(r, "heavybid_job", "hb_job", "heavy_bid_job");
     const sageJob = pick(r, "sage_job", "sage_300_job", "sage300_job");
 
     if (!projectName) { errors.push({ row: i + 2, reason: "Missing Project Name" }); continue; }
-    if (!customerName) { errors.push({ row: i + 2, reason: "Missing Customer Name" }); continue; }
+    if (!customerName && !customerNumber) { errors.push({ row: i + 2, reason: "Missing Customer Name (or Customer Number)" }); continue; }
 
-    // match
+    // opportunity match
     let existing = null as any;
     if (hbJob) existing = await prisma.opportunity.findFirst({ where: { heavyBidJobNumber: hbJob } });
     if (!existing && sageJob) existing = await prisma.opportunity.findFirst({ where: { sage300JobNumber: sageJob } });
@@ -546,7 +554,7 @@ export async function previewPipelineImport(csv: string) {
     });
     if (!existing) existing = await prisma.opportunity.findFirst({ where: { projectName: { equals: projectName, mode: "insensitive" } } });
 
-    // check estimator
+    // estimator check
     const estimatorName = pick(r, "estimator", "estimator_name");
     if (estimatorName) {
       const u = await prisma.user.findFirst({
@@ -555,15 +563,26 @@ export async function previewPipelineImport(csv: string) {
       if (!u) unknownEstimators.add(estimatorName);
     }
 
-    // check customer
-    const c = await prisma.customer.findFirst({ where: { companyName: { equals: customerName, mode: "insensitive" } } });
-    if (!c) unknownCustomers.add(customerName);
+    // customer match using the smart resolver — cached per name to avoid repeating
+    const key = customerNumber ? `#${customerNumber}` : (customerName || "").trim();
+    if (key && !(key in customerSuggestions)) {
+      const m = await matchCustomer(customerName, customerNumber);
+      customerSuggestions[key] = {
+        rawName: customerName,
+        customerNumber: customerNumber || null,
+        match: m.customer,
+        matchedBy: m.matchedBy,
+        suggestions: m.suggestions,
+      };
+    }
 
     const value = parseMoney(pick(r, "estimated_value", "value", "bid_total", "contract_amount"));
     const summary = {
       rowIndex: i + 2,
       projectName,
       customerName,
+      customerNumber: customerNumber || null,
+      customerKey: key,
       estimatedValueCents: value?.toString() ?? null,
       stage: mapStage(pick(r, "stage", "status")) || "LEAD",
       bidDueDate: parseDate(pick(r, "bid_due_date", "bid_due", "due_date"))?.toISOString() ?? null,
@@ -578,12 +597,17 @@ export async function previewPipelineImport(csv: string) {
     matched,
     newRows,
     errors,
-    unknownCustomers: Array.from(unknownCustomers),
+    customerSuggestions,
     unknownEstimators: Array.from(unknownEstimators),
   };
 }
 
-export async function commitPipelineImport(csv: string, actorUserId: number, fileName?: string) {
+export async function commitPipelineImport(
+  csv: string,
+  actorUserId: number,
+  fileName?: string,
+  customerMappings?: Record<string, number>, // customerKey → customerId override (from preview UI)
+) {
   const parsed = parseCSV(csv);
   let created = 0, updated = 0, skipped = 0;
   const errors: { row: number; reason: string }[] = [];
@@ -592,8 +616,9 @@ export async function commitPipelineImport(csv: string, actorUserId: number, fil
     const r = parsed.rows[i];
     const projectName = pick(r, "project_name", "project", "job_name", "name");
     const customerName = pick(r, "customer_name", "customer", "owner", "client");
-    if (!projectName || !customerName) {
-      errors.push({ row: i + 2, reason: "Missing project or customer name" });
+    const customerNumberRaw = pick(r, "customer_number", "customer_no", "cus_number", "cus");
+    if (!projectName || (!customerName && !customerNumberRaw)) {
+      errors.push({ row: i + 2, reason: "Missing project name or customer" });
       skipped++;
       continue;
     }
@@ -615,9 +640,39 @@ export async function commitPipelineImport(csv: string, actorUserId: number, fil
       });
       if (u) pmId = u.id;
     }
+    // Customer resolution: explicit mapping > Customer Number > smart name match.
+    // If no match, auto-create the customer (with auto-assigned CUS-####).
     let customerId: number | null = null;
-    const cust = await prisma.customer.findFirst({ where: { companyName: { equals: customerName, mode: "insensitive" } } });
-    if (cust) customerId = cust.id;
+    let resolvedCustomerName = customerName;
+    const customerKey = customerNumberRaw ? `#${customerNumberRaw}` : (customerName || "").trim();
+    if (customerMappings && customerKey && customerMappings[customerKey]) {
+      const mapped = await prisma.customer.findUnique({ where: { id: customerMappings[customerKey] } });
+      if (mapped) {
+        customerId = mapped.id;
+        resolvedCustomerName = mapped.companyName;
+        // Save the original spelling as an alias so future imports auto-match
+        if (customerName && normalizeName(customerName) !== normalizeName(mapped.companyName)) {
+          try {
+            await prisma.customerAlias.create({ data: { customerId: mapped.id, alias: customerName, normalized: normalizeName(customerName) } });
+          } catch { /* duplicate alias — ignore */ }
+        }
+      }
+    }
+    if (!customerId) {
+      const m = await matchCustomer(customerName, customerNumberRaw);
+      if (m.customer) {
+        customerId = m.customer.id;
+        resolvedCustomerName = m.customer.companyName;
+      } else if (customerName) {
+        // Auto-create
+        const num = await nextCustomerNumber();
+        const c = await prisma.customer.create({
+          data: { customerNumber: num, companyName: customerName, customerType: mapCustomerType(pick(r, "customer_type")) as any || "GC", createdById: actorUserId, updatedById: actorUserId },
+        });
+        customerId = c.id;
+        resolvedCustomerName = c.companyName;
+      }
+    }
 
     const hbJob = pick(r, "heavybid_job", "hb_job", "heavy_bid_job") || null;
     const sageJob = pick(r, "sage_job", "sage_300_job", "sage300_job") || null;
@@ -644,7 +699,7 @@ export async function commitPipelineImport(csv: string, actorUserId: number, fil
 
     const baseData: any = {
       projectName,
-      customerName,
+      customerName: resolvedCustomerName || customerName,
       customerId: customerId,
       customerType: mapCustomerType(pick(r, "customer_type")) || "GC",
       projectType: pick(r, "project_type", "type") || "",
@@ -739,16 +794,22 @@ export async function previewCustomersImport(csv: string) {
   for (let i = 0; i < parsed.rows.length; i++) {
     const r = parsed.rows[i];
     const companyName = pick(r, "company_name", "company", "customer", "name");
-    if (!companyName) { errors.push({ row: i + 2, reason: "Missing Company Name" }); continue; }
-    const existing = await prisma.customer.findFirst({ where: { companyName: { equals: companyName, mode: "insensitive" } } });
+    const customerNumber = pick(r, "customer_number", "customer_no", "cus_number", "cus");
+    if (!companyName && !customerNumber) {
+      errors.push({ row: i + 2, reason: "Need Company Name or Customer Number" });
+      continue;
+    }
+    const m = await matchCustomer(companyName, customerNumber);
     const summary = {
       rowIndex: i + 2,
       companyName,
+      customerNumber: customerNumber || null,
       customerType: mapCustomerType(pick(r, "customer_type", "type")),
       tier: mapTier(pick(r, "tier")),
-      matchedCustomerId: existing?.id ?? null,
+      matchedCustomerId: m.customer?.id ?? null,
+      matchedBy: m.matchedBy,
     };
-    if (existing) matched.push(summary);
+    if (m.customer) matched.push(summary);
     else newRows.push(summary);
   }
   return { totalRows: parsed.rows.length, matched, newRows, errors };
@@ -761,9 +822,12 @@ export async function commitCustomersImport(csv: string, actorUserId: number, fi
   for (let i = 0; i < parsed.rows.length; i++) {
     const r = parsed.rows[i];
     const companyName = pick(r, "company_name", "company", "customer", "name");
-    if (!companyName) { errors.push({ row: i + 2, reason: "Missing Company Name" }); skipped++; continue; }
+    const customerNumber = pick(r, "customer_number", "customer_no", "cus_number", "cus");
+    if (!companyName && !customerNumber) { errors.push({ row: i + 2, reason: "Need Company Name or Customer Number" }); skipped++; continue; }
+    const aliasesRaw = pick(r, "aliases", "alias", "also_known_as", "dba");
+    const aliases = aliasesRaw ? aliasesRaw.split(/[|;]/).map((s) => s.trim()).filter(Boolean) : [];
     const data: any = {
-      companyName,
+      companyName: companyName || "(unknown)",
       primaryContact: pick(r, "primary_contact", "contact") || null,
       phone: pick(r, "phone") || null,
       email: pick(r, "email") || null,
@@ -773,13 +837,25 @@ export async function commitCustomersImport(csv: string, actorUserId: number, fi
       notes: pick(r, "notes") || null,
     };
     try {
-      const existing = await prisma.customer.findFirst({ where: { companyName: { equals: companyName, mode: "insensitive" } } });
-      if (existing) {
-        await prisma.customer.update({ where: { id: existing.id }, data: { ...data, updatedById: actorUserId } });
+      const m = await matchCustomer(companyName, customerNumber);
+      let cId: number;
+      if (m.customer) {
+        await prisma.customer.update({ where: { id: m.customer.id }, data: { ...data, updatedById: actorUserId } });
+        cId = m.customer.id;
         updated++;
       } else {
-        await prisma.customer.create({ data: { ...data, createdById: actorUserId, updatedById: actorUserId } });
+        const num = customerNumber || (await nextCustomerNumber());
+        const c = await prisma.customer.create({
+          data: { ...data, customerNumber: num, createdById: actorUserId, updatedById: actorUserId },
+        });
+        cId = c.id;
         created++;
+      }
+      // Sync aliases (additive — never remove existing)
+      for (const a of aliases) {
+        try {
+          await prisma.customerAlias.create({ data: { customerId: cId, alias: a, normalized: normalizeName(a) } });
+        } catch { /* unique conflict — already exists, skip */ }
       }
     } catch (e: any) {
       errors.push({ row: i + 2, reason: e.message || "DB write failed" });

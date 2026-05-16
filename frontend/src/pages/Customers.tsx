@@ -106,7 +106,9 @@ export default function Customers() {
         <table className="min-w-full text-sm">
           <thead className="bg-redland-charcoal text-white">
             <tr>
+              <th className="px-3 py-2 text-left">Cust #</th>
               <th className="px-3 py-2 text-left">Company</th>
+              <th className="px-3 py-2 text-left">Aliases</th>
               <th className="px-3 py-2 text-left">Type</th>
               <th className="px-3 py-2 text-left">Tier</th>
               <th className="px-3 py-2 text-right">Projects</th>
@@ -123,11 +125,20 @@ export default function Customers() {
               const concentration = totalRevenue ? (Number(c.totalRevenueCents) / totalRevenue) * 100 : 0;
               return (
                 <tr key={c.id} className="border-t hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-xs text-gray-600">{c.customerNumber || "—"}</td>
                   <td className="px-3 py-2 font-semibold">
                     <button onClick={() => setDetailCustomer(c)} className="text-redland-red hover:underline text-left">
                       {c.companyName}
                     </button>
                     {c.lastLook && <span className="ml-2 badge bg-redland-gold text-redland-charcoal">Last Look</span>}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-600 max-w-[180px]">
+                    {(c.aliases && c.aliases.length > 0) ? (
+                      <span title={c.aliases.map((a: any) => a.alias).join(", ")}>
+                        {c.aliases.slice(0, 2).map((a: any) => a.alias).join(", ")}
+                        {c.aliases.length > 2 && <span className="text-gray-400"> +{c.aliases.length - 2}</span>}
+                      </span>
+                    ) : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="px-3 py-2">{c.customerType.replace("_", " ")}</td>
                   <td className="px-3 py-2"><span className={`badge ${TIER_COLOR[c.tier]}`}>{c.tier}</span></td>
@@ -153,7 +164,7 @@ export default function Customers() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={readOnly ? 9 : 10} className="text-center text-gray-500 py-6">
+                <td colSpan={readOnly ? 11 : 12} className="text-center text-gray-500 py-6">
                   No customers yet.
                 </td>
               </tr>
@@ -163,7 +174,7 @@ export default function Customers() {
       </div>
 
       <Modal open={!!detailCustomer} onClose={() => setDetailCustomer(null)} title={detailCustomer?.companyName || ""} size="lg">
-        {detailCustomer && <CustomerDetail customer={detailCustomer} />}
+        {detailCustomer && <CustomerDetail customer={detailCustomer} onChanged={load} />}
       </Modal>
 
       <Modal open={showAdd || !!adding} onClose={() => { setShowAdd(false); setAdding(null); }} title={adding ? "Edit Customer" : "New Customer"} size="md">
@@ -276,21 +287,98 @@ function CustomerForm({
   );
 }
 
-function CustomerDetail({ customer }: { customer: Customer }) {
+function CustomerDetail({ customer, onChanged }: { customer: Customer; onChanged?: () => void }) {
+  const { user } = useAuth();
   const [summary, setSummary] = useState<any>(null);
   const [touchpoints, setTouchpoints] = useState<any>(null);
+  const [aliases, setAliases] = useState<any[]>(customer.aliases || []);
+  const [newAlias, setNewAlias] = useState("");
+  const [otherCustomers, setOtherCustomers] = useState<any[]>([]);
+  const [mergeTarget, setMergeTarget] = useState<string>("");
+  const isAdmin = user?.role === "ADMIN" || user?.role === "LEADERSHIP";
 
   useEffect(() => {
     api(`/api/customers/${customer.id}/summary`).then(setSummary).catch(() => {});
     api(`/api/customers/${customer.id}/touchpoints`).then(setTouchpoints).catch(() => {});
-  }, [customer.id]);
+    api(`/api/customers/${customer.id}/aliases`).then(setAliases).catch(() => {});
+    if (isAdmin) {
+      api<any[]>("/api/customers").then((rows) => setOtherCustomers(rows.filter((c) => c.id !== customer.id))).catch(() => {});
+    }
+  }, [customer.id, isAdmin]);
+
+  async function addAlias() {
+    if (!newAlias.trim()) return;
+    try {
+      await api(`/api/customers/${customer.id}/aliases`, { method: "POST", body: JSON.stringify({ alias: newAlias.trim() }) });
+      setNewAlias("");
+      setAliases(await api(`/api/customers/${customer.id}/aliases`));
+      onChanged?.();
+    } catch (e: any) {
+      alert(e.message || "Failed");
+    }
+  }
+  async function removeAlias(id: number) {
+    await api(`/api/customers/aliases/${id}`, { method: "DELETE" });
+    setAliases(await api(`/api/customers/${customer.id}/aliases`));
+    onChanged?.();
+  }
+  async function doMerge() {
+    if (!mergeTarget) return;
+    const target = otherCustomers.find((c) => String(c.id) === mergeTarget);
+    if (!target) return;
+    if (!confirm(`Merge "${customer.companyName}" INTO "${target.companyName}"?\n\nAll opportunities, contacts, and compliance docs will move to ${target.companyName}.\n${customer.companyName} will be archived.\nThis is reversible only by an admin restoring the archived record.`)) return;
+    const r = await api<{ opportunitiesRepointed: number; contactsRepointed: number }>(`/api/customers/${customer.id}/merge-into/${mergeTarget}`, { method: "POST" });
+    alert(`Merge complete. ${r.opportunitiesRepointed} opportunities, ${r.contactsRepointed} contacts repointed.`);
+    onChanged?.();
+  }
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-3 text-sm">
+        <span className="font-mono text-gray-500">{customer.customerNumber || "—"}</span>
+        <span className="font-semibold">{customer.companyName}</span>
+      </div>
+
       <div className="card p-3 bg-redland-gold/10 border-redland-gold/40">
         <div className="text-xs uppercase font-semibold text-gray-500 mb-1">Smart summary</div>
         <div className="text-sm">{summary?.summary || "Loading…"}</div>
       </div>
+
+      <div className="card p-3">
+        <div className="font-bold text-redland-charcoal mb-2 flex items-center justify-between">
+          <span>Aliases / alternate names <span className="text-xs font-normal text-gray-500">({aliases.length})</span></span>
+        </div>
+        <p className="text-xs text-gray-600 mb-2">Add every variant you've seen this customer's name written as — "Suffolk", "Suffolk Inc", typos. Future imports will route them all here automatically.</p>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {aliases.map((a) => (
+            <span key={a.id} className="badge bg-gray-100 text-gray-800 inline-flex items-center gap-1">
+              {a.alias}
+              <button onClick={() => removeAlias(a.id)} className="text-gray-400 hover:text-red-700 text-xs">×</button>
+            </span>
+          ))}
+          {aliases.length === 0 && <span className="text-xs text-gray-500">No aliases yet.</span>}
+        </div>
+        <div className="flex gap-2">
+          <input className="input flex-1 text-sm" placeholder="Add an alias…" value={newAlias} onChange={(e) => setNewAlias(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addAlias())} />
+          <button onClick={addAlias} className="btn-ghost text-xs">Add</button>
+        </div>
+      </div>
+
+      {isAdmin && (
+        <div className="card p-3 bg-red-50/30 border-red-200">
+          <div className="font-bold text-redland-charcoal mb-2">Merge into another customer</div>
+          <p className="text-xs text-gray-600 mb-2">If this is a duplicate, pick the canonical record and merge — all opportunities, contacts, and compliance move to the keeper, and this name becomes an alias.</p>
+          <div className="flex gap-2">
+            <select className="input flex-1 text-sm" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+              <option value="">Pick the canonical customer to keep…</option>
+              {otherCustomers.map((c) => (
+                <option key={c.id} value={c.id}>{c.customerNumber ? `${c.customerNumber} — ` : ""}{c.companyName}</option>
+              ))}
+            </select>
+            <button onClick={doMerge} disabled={!mergeTarget} className="btn-danger text-xs disabled:opacity-50">Merge</button>
+          </div>
+        </div>
+      )}
 
       {summary && (
         <div className="grid sm:grid-cols-4 gap-2 text-center">

@@ -200,6 +200,7 @@ function ImportPanel({ previewPath, importPath, templatePath, title, blurb, samp
   const [preview, setPreview] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [customerMappings, setCustomerMappings] = useState<Record<string, number>>({});
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   function onFile(f: File | null) {
@@ -247,12 +248,13 @@ function ImportPanel({ previewPath, importPath, templatePath, title, blurb, samp
     try {
       const r = await api<any>(importPath, {
         method: "POST",
-        body: JSON.stringify({ csv, fileName }),
+        body: JSON.stringify({ csv, fileName, customerMappings }),
       });
       setResult(r);
       setCsv("");
       setFileName("");
       setPreview(null);
+      setCustomerMappings({});
       if (fileRef.current) fileRef.current.value = "";
       onComplete();
     } catch (e: any) {
@@ -323,6 +325,14 @@ function ImportPanel({ previewPath, importPath, templatePath, title, blurb, samp
               <div className="text-yellow-700 text-[0.7rem]">Catch typos here before committing — otherwise duplicate records will be created.</div>
             </div>
           )}
+
+          {preview.customerSuggestions && Object.keys(preview.customerSuggestions).length > 0 && (
+            <CustomerMapper
+              suggestions={preview.customerSuggestions}
+              mappings={customerMappings}
+              onChange={setCustomerMappings}
+            />
+          )}
           <div className="max-h-48 overflow-y-auto text-xs space-y-1">
             {preview.matched.slice(0, 5).map((m: any) => (
               <div key={m.rowIndex} className="text-green-700">↻ {rowLabel(m)} → matched</div>
@@ -355,6 +365,78 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
     <div className="bg-gray-50 rounded p-2">
       <div className="text-[0.65rem] text-gray-500 uppercase font-semibold">{label}</div>
       <div className={`text-xl font-extrabold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function CustomerMapper({ suggestions, mappings, onChange }: {
+  suggestions: Record<string, any>;
+  mappings: Record<string, number>;
+  onChange: (m: Record<string, number>) => void;
+}) {
+  // Three groups: matched-via-something, has-suggestions-but-no-match, totally unknown
+  const entries = Object.entries(suggestions);
+  const auto = entries.filter(([_, s]) => s.match);
+  const fuzzy = entries.filter(([_, s]) => !s.match && s.suggestions.length > 0);
+  const unknown = entries.filter(([_, s]) => !s.match && s.suggestions.length === 0);
+
+  function pick(key: string, customerId: number | null) {
+    const next = { ...mappings };
+    if (customerId === null) delete next[key];
+    else next[key] = customerId;
+    onChange(next);
+  }
+
+  return (
+    <div className="card p-3 space-y-3 border-blue-200 bg-blue-50/30">
+      <div className="font-bold text-redland-charcoal text-sm">Customer matching</div>
+      <p className="text-xs text-gray-600">
+        {auto.length} customer name(s) auto-matched · {fuzzy.length} need your confirmation · {unknown.length} will be created fresh
+      </p>
+
+      {fuzzy.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-bold text-yellow-800">⚠ Did you mean…?</div>
+          <p className="text-xs text-gray-600">When you pick a match, the original spelling becomes an alias so future imports auto-route here.</p>
+          {fuzzy.map(([key, s]: [string, any]) => {
+            const picked = mappings[key];
+            return (
+              <div key={key} className="border border-yellow-200 bg-white rounded p-2">
+                <div className="text-sm">
+                  <strong className="text-redland-charcoal">"{s.rawName || key}"</strong>
+                  <span className="text-xs text-gray-500"> in CSV</span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {s.suggestions.map((sug: any) => (
+                    <button
+                      key={sug.id}
+                      onClick={() => pick(key, picked === sug.id ? null : sug.id)}
+                      className={`text-xs px-2 py-1 rounded border ${picked === sug.id ? "bg-green-600 text-white border-green-600" : "bg-white border-gray-300 hover:border-redland-red"}`}
+                      title={`Match score: ${(sug.score * 100).toFixed(0)}%`}
+                    >
+                      {picked === sug.id && "✓ "}{sug.customerNumber || ""} {sug.companyName} <span className="opacity-70">({(sug.score * 100).toFixed(0)}%)</span>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => pick(key, picked === -1 ? null : -1)}
+                    className="text-xs px-2 py-1 rounded border bg-white border-gray-300 hover:border-redland-charcoal text-gray-700"
+                  >
+                    Create new
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {unknown.length > 0 && (
+        <div className="text-xs text-gray-600">
+          <strong>Will be created as new customers ({unknown.length}):</strong>{" "}
+          {unknown.slice(0, 6).map(([_, s]: [string, any]) => s.rawName).filter(Boolean).join(", ")}
+          {unknown.length > 6 && "…"}
+        </div>
+      )}
     </div>
   );
 }
