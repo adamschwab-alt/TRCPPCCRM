@@ -39,24 +39,26 @@ const HEADER_ALIASES: Record<string, string[]> = {
   status: ['status', 'orderstatus', 'sostatus', 'docstatus', 'invoicestatus'],
   so_type: ['sotype', 'ordertype', 'documenttype', 'doctype', 'type'],
   account_name: [
-    'account',
-    'accountname',
-    'parent',
-    'parentaccount',
+    'parentcustomername',
     'parentcustomer',
-    'company',
+    'parentaccount',
+    'parent',
     'nationalaccount',
+    'accountname',
+    'company',
+    'account',
   ],
   branch_name: [
-    'branch',
-    'branchname',
+    'customer2',
     'shipto',
     'shiptoname',
+    'branch',
+    'branchname',
     'location',
     'site',
     'store',
-    'customer',
     'customername',
+    'customer',
   ],
   inventory_id: ['inventoryid', 'itemid', 'item', 'sku', 'partnumber', 'partno', 'inventory'],
   inventory_description: [
@@ -66,9 +68,9 @@ const HEADER_ALIASES: Record<string, string[]> = {
     'itemdesc',
     'desc',
   ],
-  item_class: ['itemclass', 'class', 'category', 'productclass'],
-  product_line: ['productline', 'prodline', 'product', 'plgroup', 'familygroup'],
-  sales_person: ['salesperson', 'salesrep', 'salesman', 'accountmanager', 'rep'],
+  item_class: ['itemclass2', 'itemclass', 'class', 'category', 'productclass'],
+  product_line: ['cat', 'productline', 'prodline', 'product', 'plgroup', 'familygroup'],
+  sales_person: ['salespers', 'salesperson', 'salesrep', 'salesman', 'accountmanager', 'rep'],
   state: ['state', 'shiptostate', 'st', 'province'],
   city: ['city', 'shiptocity'],
   invoice_nbr: ['invoicenbr', 'invoice', 'invoiceno', 'invoicenumber', 'invno'],
@@ -108,9 +110,15 @@ function toISODate(v: unknown): string | null {
 }
 
 function classifyProductLine(raw: string | null, itemClass: string | null, desc: string | null) {
-  const hay = `${raw ?? ''} ${itemClass ?? ''} ${desc ?? ''}`.toLowerCase();
+  // An explicit product-line column (e.g. the workbook's `Cat`) is authoritative.
+  const r = raw?.trim().toLowerCase();
+  if (r === 'aluminum' || r === 'aluminium') return 'Aluminum' as const;
+  if (r === 'steel') return 'Steel' as const;
+  if (r === 'other') return 'Other' as const;
   if (raw && /^alum/i.test(raw.trim())) return 'Aluminum' as const;
   if (raw && /^steel/i.test(raw.trim())) return 'Steel' as const;
+  // No usable explicit value → infer from item class / description.
+  const hay = `${itemClass ?? ''} ${desc ?? ''}`.toLowerCase();
   if (/\balum|\baluminium|\baluminum/.test(hay)) return 'Aluminum' as const;
   if (/\bsteel/.test(hay)) return 'Steel' as const;
   return 'Other' as const;

@@ -24,20 +24,19 @@ function readSettingsSheet(buffer: Buffer): { asOfDate?: string } {
     const wb = XLSX.read(buffer, { type: 'buffer' });
     const name = wb.SheetNames.find((n) => n.toLowerCase().includes('setting'));
     if (!name) return {};
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[name], {
-      defval: null,
-    });
-    for (const row of rows) {
-      for (const [k, v] of Object.entries(row)) {
-        if (/as.?of/i.test(k) && v) {
-          const d = typeof v === 'number' ? XLSX.SSF.parse_date_code(v) : null;
+    // Settings is a label/value layout: scan rows for the "As-of (month-end)" cell
+    // and take the adjacent value (an Excel serial date).
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: null });
+    for (const row of aoa) {
+      const label = String(row?.[0] ?? '');
+      if (/as.?of/i.test(label)) {
+        const v = row.find((c, i) => i > 0 && typeof c === 'number');
+        if (typeof v === 'number') {
+          const d = XLSX.SSF.parse_date_code(v);
           if (d)
             return {
               asOfDate: `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`,
             };
-          const parsed = new Date(String(v));
-          if (!Number.isNaN(parsed.getTime()))
-            return { asOfDate: parsed.toISOString().slice(0, 10) };
         }
       }
     }

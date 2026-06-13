@@ -173,10 +173,22 @@ select
 from k;
 
 -- ── Cross-sell white-space summary (branch grain), role-scoped ──────────────
+-- ttm_revenue here is the IN-LINE revenue for the gap (the cross-sell base):
+-- for aluminum-only branches it's their aluminum TTM, for steel-only it's steel TTM.
 create view whitespace_summary with (security_invoker = on) as
 select
   white_space,
-  count(*)                  as branch_count,
-  coalesce(sum(ttm_revenue), 0) as ttm_revenue
+  count(*) as branch_count,
+  coalesce(
+    sum(
+      case
+        when white_space = 'Steel gap' then aluminum_ttm
+        when white_space = 'Alu gap' then steel_ttm
+        when white_space = '—' then aluminum_ttm + steel_ttm
+        else 0
+      end
+    ),
+    0
+  ) as ttm_revenue
 from branch_metrics
 group by white_space;
