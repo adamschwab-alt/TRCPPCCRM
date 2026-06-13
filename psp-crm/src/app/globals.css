@@ -1,26 +1,67 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Pacific Shoring light branding (§8). Safety-orange + charcoal per the brief's
+ * documented fallback palette. Drop the real logo at /public/psp-logo.svg (or
+ * Supabase Storage) to swap the wordmark; tokens below are the theme source.
+ */
+@theme {
+  --color-brand: #f26a1b; /* safety orange */
+  --color-brand-50: #fef2ea;
+  --color-brand-100: #fde0cd;
+  --color-brand-600: #d8550f;
+  --color-brand-700: #b4470d;
+
+  --color-charcoal: #1e1e1e;
+  --color-charcoal-2: #2b2f33;
+
+  --color-ink: #1e1e1e;
+  --color-muted: #6b7280;
+  --color-surface: #ffffff;
+  --color-canvas: #f4f5f7;
+  --color-line: #e5e7eb;
+
+  /* RAG status palette */
+  --color-ontrack: #15803d;
+  --color-ontrack-bg: #dcfce7;
+  --color-watch: #b45309;
+  --color-watch-bg: #fef3c7;
+  --color-atrisk: #b91c1c;
+  --color-atrisk-bg: #fee2e2;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-charcoal outline-none focus:border-brand focus:ring-1 focus:ring-brand;
+  }
+  .btn-primary {
+    @apply rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-secondary {
+    @apply rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-charcoal-2 hover:bg-canvas;
+  }
+}
+
+/* Comfortable tap targets on mobile (≥44px) for operator use. */
+@media (max-width: 640px) {
+  button,
+  a[role='button'],
+  [data-tap] {
+    min-height: 44px;
+  }
 }
