@@ -39,10 +39,14 @@ async function main() {
       );
     `);
     const applied = new Set(
-      (await client.query<{ name: string }>('select name from _migrations')).rows.map((r) => r.name),
+      (await client.query<{ name: string }>('select name from _migrations')).rows.map(
+        (r) => r.name,
+      ),
     );
 
-    const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+    const files = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
     let count = 0;
     for (const file of files) {
       if (applied.has(file)) continue;
@@ -60,7 +64,9 @@ async function main() {
         throw e;
       }
     }
-    console.log(count === 0 ? 'Up to date — no pending migrations.' : `Applied ${count} migration(s).`);
+    console.log(
+      count === 0 ? 'Up to date — no pending migrations.' : `Applied ${count} migration(s).`,
+    );
   } finally {
     await client.end();
   }

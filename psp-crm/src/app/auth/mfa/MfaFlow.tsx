@@ -85,15 +85,15 @@ export function MfaFlow() {
   }
 
   if (mode === 'loading') {
-    return <p className="text-sm text-muted">Loading…</p>;
+    return <p className="text-muted text-sm">Loading…</p>;
   }
 
   return (
     <div>
-      <h1 className="text-lg font-bold text-charcoal">
+      <h1 className="text-charcoal text-lg font-bold">
         {mode === 'enroll' ? 'Set up two-factor auth' : 'Two-factor verification'}
       </h1>
-      <p className="mt-1 text-sm text-muted">
+      <p className="text-muted mt-1 text-sm">
         {mode === 'enroll'
           ? 'Scan the QR code with an authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code.'
           : 'Enter the 6-digit code from your authenticator app.'}
@@ -105,7 +105,7 @@ export function MfaFlow() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qr} alt="TOTP QR code" className="h-44 w-44" />
           {secret && (
-            <p className="mt-2 break-all text-center text-xs text-muted">
+            <p className="text-muted mt-2 text-center text-xs break-all">
               Or enter this key manually:
               <br />
               <code className="font-mono">{secret}</code>
@@ -126,13 +126,18 @@ export function MfaFlow() {
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
         />
         {error && <p className="text-sm text-[var(--color-atrisk)]">{error}</p>}
-        <button type="submit" disabled={busy || code.length !== 6} className="btn-primary w-full" data-tap>
+        <button
+          type="submit"
+          disabled={busy || code.length !== 6}
+          className="btn-primary w-full"
+          data-tap
+        >
           {busy ? 'Verifying…' : 'Verify'}
         </button>
       </form>
 
       <form action="/auth/signout" method="post" className="mt-3">
-        <button type="submit" className="w-full text-center text-xs text-muted hover:underline">
+        <button type="submit" className="text-muted w-full text-center text-xs hover:underline">
           Cancel and sign out
         </button>
       </form>

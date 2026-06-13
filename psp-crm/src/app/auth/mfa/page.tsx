@@ -9,7 +9,7 @@ export default function MfaPage() {
         <div className="mb-8 flex justify-center">
           <Logo />
         </div>
-        <div className="rounded-lg border border-line bg-surface p-6 shadow-sm">
+        <div className="border-line bg-surface rounded-lg border p-6 shadow-sm">
           <Suspense>
             <MfaFlow />
           </Suspense>

@@ -9,14 +9,14 @@ export default function LoginPage() {
         <div className="mb-8 flex justify-center">
           <Logo />
         </div>
-        <div className="rounded-lg border border-line bg-surface p-6 shadow-sm">
-          <h1 className="text-lg font-bold text-charcoal">Sign in</h1>
-          <p className="mt-1 text-sm text-muted">Invite-only. TOTP MFA is required.</p>
+        <div className="border-line bg-surface rounded-lg border p-6 shadow-sm">
+          <h1 className="text-charcoal text-lg font-bold">Sign in</h1>
+          <p className="text-muted mt-1 text-sm">Invite-only. TOTP MFA is required.</p>
           <Suspense>
             <LoginForm />
           </Suspense>
         </div>
-        <p className="mt-4 text-center text-xs text-muted">
+        <p className="text-muted mt-4 text-center text-xs">
           Need access? Ask an admin to send an invite.
         </p>
       </div>

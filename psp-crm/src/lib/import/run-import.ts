@@ -102,7 +102,9 @@ export async function runImport(
   const toInsert = dataset.transactions
     .map((t) => {
       const accountId = accountIdByName.get(t.account_name.toLowerCase()) ?? null;
-      const branchId = accountId ? (branchIdByKey.get(branchKey(accountId, t.branch_name)) ?? null) : null;
+      const branchId = accountId
+        ? (branchIdByKey.get(branchKey(accountId, t.branch_name)) ?? null)
+        : null;
       return { t, accountId, branchId };
     })
     .filter(({ t }) => {
@@ -117,32 +119,30 @@ export async function runImport(
 
   let inserted = 0;
   for (const batch of chunk(toInsert, 500)) {
-    const { error, count } = await supabase
-      .from('sales_transactions')
-      .insert(
-        batch.map(({ t, accountId, branchId }) => ({
-          date: t.date,
-          net_sale: t.net_sale,
-          quantity: t.quantity,
-          cost: t.cost,
-          margin: t.margin,
-          status: t.status,
-          so_type: t.so_type,
-          account_id: accountId,
-          branch_id: branchId,
-          inventory_id: t.inventory_id,
-          inventory_description: t.inventory_description,
-          item_class: t.item_class,
-          product_line: t.product_line,
-          sales_person: t.sales_person,
-          state: t.state,
-          city: t.city,
-          invoice_nbr: t.invoice_nbr,
-          so_nbr: t.so_nbr,
-          line_nbr: t.line_nbr,
-        })),
-        { count: 'exact' },
-      );
+    const { error, count } = await supabase.from('sales_transactions').insert(
+      batch.map(({ t, accountId, branchId }) => ({
+        date: t.date,
+        net_sale: t.net_sale,
+        quantity: t.quantity,
+        cost: t.cost,
+        margin: t.margin,
+        status: t.status,
+        so_type: t.so_type,
+        account_id: accountId,
+        branch_id: branchId,
+        inventory_id: t.inventory_id,
+        inventory_description: t.inventory_description,
+        item_class: t.item_class,
+        product_line: t.product_line,
+        sales_person: t.sales_person,
+        state: t.state,
+        city: t.city,
+        invoice_nbr: t.invoice_nbr,
+        so_nbr: t.so_nbr,
+        line_nbr: t.line_nbr,
+      })),
+      { count: 'exact' },
+    );
     if (error) throw error;
     inserted += count ?? batch.length;
   }
@@ -153,7 +153,8 @@ export async function runImport(
     .map((t) => t.date)
     .sort();
   const maxDate = bookedDates[bookedDates.length - 1];
-  const asOfDate = opts.asOfDate ?? (maxDate ? endOfMonth(maxDate) : new Date().toISOString().slice(0, 10));
+  const asOfDate =
+    opts.asOfDate ?? (maxDate ? endOfMonth(maxDate) : new Date().toISOString().slice(0, 10));
   const { error: settErr } = await supabase
     .from('app_settings')
     .update({ as_of_date: asOfDate })

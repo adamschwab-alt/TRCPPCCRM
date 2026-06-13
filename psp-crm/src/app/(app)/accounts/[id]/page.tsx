@@ -14,14 +14,14 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div>
-      <Link href="/accounts" className="text-sm text-brand-700 hover:underline">
+      <Link href="/accounts" className="text-brand-700 text-sm hover:underline">
         ← Accounts
       </Link>
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-bold tracking-tight text-charcoal">{account.account_name}</h1>
+        <h1 className="text-charcoal text-xl font-bold tracking-tight">{account.account_name}</h1>
         <StatusBadge status={account.status} />
         <RagBadge rag={account.coverage_rag} />
-        <span className="text-sm text-muted">{account.primary_state ?? ''}</span>
+        <span className="text-muted text-sm">{account.primary_state ?? ''}</span>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -45,7 +45,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead>
-              <tr className="border-b border-line text-left text-xs uppercase text-muted">
+              <tr className="border-line text-muted border-b text-left text-xs uppercase">
                 <th className="px-4 py-2.5">Branch</th>
                 <th className="px-4 py-2.5">Location</th>
                 <th className="px-4 py-2.5 text-right">TTM</th>
@@ -58,16 +58,24 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
             </thead>
             <tbody>
               {branches.map((b) => (
-                <tr key={b.branch_id} className="border-b border-line/60 last:border-0 hover:bg-canvas">
+                <tr
+                  key={b.branch_id}
+                  className="border-line/60 hover:bg-canvas border-b last:border-0"
+                >
                   <td className="px-4 py-2.5">
-                    <Link href={`/branches/${b.branch_id}`} className="font-medium text-brand-700 hover:underline">
+                    <Link
+                      href={`/branches/${b.branch_id}`}
+                      className="text-brand-700 font-medium hover:underline"
+                    >
                       {b.branch_name}
                     </Link>
                   </td>
-                  <td className="px-4 py-2.5 text-muted">
+                  <td className="text-muted px-4 py-2.5">
                     {[b.city, b.state].filter(Boolean).join(', ') || '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmtCurrencyShort(b.ttm_revenue)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    {fmtCurrencyShort(b.ttm_revenue)}
+                  </td>
                   <td
                     className={`px-4 py-2.5 text-right tabular-nums ${
                       b.delta < 0 ? 'text-[var(--color-atrisk)]' : 'text-[var(--color-ontrack)]'
@@ -75,7 +83,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
                   >
                     {fmtDeltaPct(b.delta_pct)}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                  <td className="text-muted px-4 py-2.5 text-right tabular-nums">
                     {b.days_idle !== null ? `${b.days_idle}d` : '—'}
                   </td>
                   <td className="px-4 py-2.5">
@@ -84,7 +92,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
                   <td className="px-4 py-2.5">
                     <RagBadge rag={b.coverage_rag} />
                   </td>
-                  <td className="px-4 py-2.5 text-muted">{whiteSpaceLabel(b.white_space)}</td>
+                  <td className="text-muted px-4 py-2.5">{whiteSpaceLabel(b.white_space)}</td>
                 </tr>
               ))}
             </tbody>

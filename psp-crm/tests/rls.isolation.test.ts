@@ -73,9 +73,7 @@ describe('rep isolation', () => {
 
   it('rep1 portfolio_kpis reflect only their book ($100, not $300)', async () => {
     await actAs(db, REP1);
-    const k = await db.query<{ current_book: string }>(
-      'select current_book from portfolio_kpis',
-    );
+    const k = await db.query<{ current_book: string }>('select current_book from portfolio_kpis');
     expect(Number(k.rows[0].current_book)).toBe(100);
   });
 

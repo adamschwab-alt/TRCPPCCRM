@@ -47,13 +47,13 @@ body {
 
 @layer components {
   .input {
-    @apply w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-charcoal outline-none focus:border-brand focus:ring-1 focus:ring-brand;
+    @apply border-line text-charcoal focus:border-brand focus:ring-brand w-full rounded-md border bg-white px-3 py-2 text-sm outline-none focus:ring-1;
   }
   .btn-primary {
-    @apply rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply bg-brand hover:bg-brand-600 rounded-md px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60;
   }
   .btn-secondary {
-    @apply rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-charcoal-2 hover:bg-canvas;
+    @apply border-line text-charcoal-2 hover:bg-canvas rounded-md border bg-white px-4 py-2 text-sm font-semibold;
   }
 }
 

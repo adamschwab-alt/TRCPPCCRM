@@ -24,14 +24,20 @@ function readSettingsSheet(buffer: Buffer): { asOfDate?: string } {
     const wb = XLSX.read(buffer, { type: 'buffer' });
     const name = wb.SheetNames.find((n) => n.toLowerCase().includes('setting'));
     if (!name) return {};
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[name], { defval: null });
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[name], {
+      defval: null,
+    });
     for (const row of rows) {
       for (const [k, v] of Object.entries(row)) {
         if (/as.?of/i.test(k) && v) {
           const d = typeof v === 'number' ? XLSX.SSF.parse_date_code(v) : null;
-          if (d) return { asOfDate: `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}` };
+          if (d)
+            return {
+              asOfDate: `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`,
+            };
           const parsed = new Date(String(v));
-          if (!Number.isNaN(parsed.getTime())) return { asOfDate: parsed.toISOString().slice(0, 10) };
+          if (!Number.isNaN(parsed.getTime()))
+            return { asOfDate: parsed.toISOString().slice(0, 10) };
         }
       }
     }
@@ -54,7 +60,8 @@ async function main() {
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
+  if (!url || !serviceKey)
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
 
   const buffer = readFileSync(path);
   const adapter = new FileImportAdapter({ buffer });
@@ -69,15 +76,21 @@ async function main() {
   const summary = await runImport(supabase, dataset, { asOfDate });
 
   console.log('\n── Import summary ───────────────────────────────');
-  console.log(`accounts     : +${summary.accounts.inserted} new, ${summary.accounts.existing} existing`);
-  console.log(`branches     : +${summary.branches.inserted} new, ${summary.branches.existing} existing`);
+  console.log(
+    `accounts     : +${summary.accounts.inserted} new, ${summary.accounts.existing} existing`,
+  );
+  console.log(
+    `branches     : +${summary.branches.inserted} new, ${summary.branches.existing} existing`,
+  );
   console.log(
     `transactions : +${summary.transactions.inserted} inserted, ` +
       `${summary.transactions.skippedDuplicates} dupes skipped, ${summary.transactions.total} parsed`,
   );
   console.log(`as_of_date   : ${summary.asOfDate}`);
   if (summary.unmappedHeaders.length) {
-    console.log(`\n⚠️  Unmapped source headers (tune HEADER_ALIASES in file-import.ts if any are needed):`);
+    console.log(
+      `\n⚠️  Unmapped source headers (tune HEADER_ALIASES in file-import.ts if any are needed):`,
+    );
     console.log('   ' + summary.unmappedHeaders.join(', '));
   }
   console.log('─────────────────────────────────────────────────\n');

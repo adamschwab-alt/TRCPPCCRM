@@ -2,25 +2,19 @@ import type { ReactNode } from 'react';
 import { ragClass, statusClass } from '@/lib/format';
 import type { CoverageRag, BranchStatus } from '@/types/database';
 
-export function Card({
-  children,
-  className = '',
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`rounded-lg border border-line bg-surface ${className}`}>{children}</div>
-  );
+export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`border-line bg-surface rounded-lg border ${className}`}>{children}</div>;
 }
 
 export function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="mb-3 text-sm font-semibold tracking-tight text-charcoal">{children}</h2>;
+  return <h2 className="text-charcoal mb-3 text-sm font-semibold tracking-tight">{children}</h2>;
 }
 
 export function RagBadge({ rag }: { rag: CoverageRag }) {
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${ragClass(rag)}`}>
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${ragClass(rag)}`}
+    >
       {rag}
     </span>
   );
@@ -59,17 +53,17 @@ export function KpiTile({
           ? 'text-[var(--color-atrisk)]'
           : 'text-charcoal';
   return (
-    <Card className={`p-4 ${flagship ? 'ring-2 ring-brand/40' : ''}`}>
+    <Card className={`p-4 ${flagship ? 'ring-brand/40 ring-2' : ''}`}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
+        <span className="text-muted text-xs font-medium tracking-wide uppercase">{label}</span>
         {flagship && (
-          <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-brand-700">
+          <span className="bg-brand-50 text-brand-700 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase">
             Flagship
           </span>
         )}
       </div>
       <div className={`mt-1 text-2xl font-bold tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="mt-1 text-xs text-muted">{sub}</div>}
+      {sub && <div className="text-muted mt-1 text-xs">{sub}</div>}
     </Card>
   );
 }

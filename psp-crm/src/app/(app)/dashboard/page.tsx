@@ -33,11 +33,14 @@ export default async function DashboardPage() {
       <div>
         <PageHeader role={profile.role} asOf={settings?.as_of_date} />
         <Card className="mt-6 p-8 text-center">
-          <p className="text-lg font-semibold text-charcoal">No coverage data yet</p>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-            Import <code className="rounded bg-canvas px-1">PSP_Account_Coverage_Tracker.xlsx</code>{' '}
+          <p className="text-charcoal text-lg font-semibold">No coverage data yet</p>
+          <p className="text-muted mx-auto mt-2 max-w-md text-sm">
+            Import <code className="bg-canvas rounded px-1">PSP_Account_Coverage_Tracker.xlsx</code>{' '}
             to populate the dashboard. Run{' '}
-            <code className="rounded bg-canvas px-1">npm run db:seed -- ./data/PSP_Account_Coverage_Tracker.xlsx</code>.
+            <code className="bg-canvas rounded px-1">
+              npm run db:seed -- ./data/PSP_Account_Coverage_Tracker.xlsx
+            </code>
+            .
           </p>
         </Card>
       </div>
@@ -71,7 +74,13 @@ export default async function DashboardPage() {
           sub={
             <span>
               Prior {fmtCurrencyShort(kpis.prior_book)} ·{' '}
-              <span className={kpis.yoy && kpis.yoy >= 0 ? 'text-[var(--color-ontrack)]' : 'text-[var(--color-atrisk)]'}>
+              <span
+                className={
+                  kpis.yoy && kpis.yoy >= 0
+                    ? 'text-[var(--color-ontrack)]'
+                    : 'text-[var(--color-atrisk)]'
+                }
+              >
                 {fmtDeltaPct(kpis.yoy)} YoY
               </span>
             </span>
@@ -90,18 +99,19 @@ export default async function DashboardPage() {
           tone={tone(kpis.nrr, nrrTarget, 'gte')}
           sub={`Target ${fmtPct(nrrTarget, 0)}`}
         />
-        <KpiTile
-          label="Gross margin"
-          value={fmtPct(kpis.gm_pct)}
-          sub="TTM blended"
-        />
+        <KpiTile label="Gross margin" value={fmtPct(kpis.gm_pct)} sub="TTM blended" />
         <KpiTile
           label="Contraction"
           value={fmtCurrencyShort(kpis.contraction)}
           tone={tone(kpis.contraction, ceiling, 'lte')}
           sub={`Ceiling ${fmtCurrencyShort(ceiling)}`}
         />
-        <KpiTile label="Expansion" value={fmtCurrencyShort(kpis.expansion)} tone="good" sub="Growth in retained" />
+        <KpiTile
+          label="Expansion"
+          value={fmtCurrencyShort(kpis.expansion)}
+          tone="good"
+          sub="Growth in retained"
+        />
         <KpiTile
           label="New business"
           value={fmtCurrencyShort(kpis.new_business)}
@@ -121,11 +131,11 @@ export default async function DashboardPage() {
         <Card className="p-4 lg:col-span-2">
           <SectionTitle>Where the leak is — top contracting accounts</SectionTitle>
           {leak.length === 0 ? (
-            <p className="text-sm text-muted">No contracting accounts. 🎉</p>
+            <p className="text-muted text-sm">No contracting accounts. 🎉</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-line text-left text-xs uppercase text-muted">
+                <tr className="border-line text-muted border-b text-left text-xs uppercase">
                   <th className="py-2">Account</th>
                   <th className="py-2 text-right">TTM</th>
                   <th className="py-2 text-right">Prior</th>
@@ -135,18 +145,27 @@ export default async function DashboardPage() {
               </thead>
               <tbody>
                 {leak.map((a) => (
-                  <tr key={a.account_id} className="border-b border-line/60 last:border-0">
+                  <tr key={a.account_id} className="border-line/60 border-b last:border-0">
                     <td className="py-2">
-                      <Link href={`/accounts/${a.account_id}`} className="font-medium text-brand-700 hover:underline">
+                      <Link
+                        href={`/accounts/${a.account_id}`}
+                        className="text-brand-700 font-medium hover:underline"
+                      >
                         {a.account_name}
                       </Link>
                     </td>
-                    <td className="py-2 text-right tabular-nums">{fmtCurrencyShort(a.ttm_revenue)}</td>
-                    <td className="py-2 text-right tabular-nums text-muted">{fmtCurrencyShort(a.prior_revenue)}</td>
-                    <td className="py-2 text-right font-semibold tabular-nums text-[var(--color-atrisk)]">
+                    <td className="py-2 text-right tabular-nums">
+                      {fmtCurrencyShort(a.ttm_revenue)}
+                    </td>
+                    <td className="text-muted py-2 text-right tabular-nums">
+                      {fmtCurrencyShort(a.prior_revenue)}
+                    </td>
+                    <td className="py-2 text-right font-semibold text-[var(--color-atrisk)] tabular-nums">
                       {fmtCurrency(a.delta)}
                     </td>
-                    <td className="py-2 text-right tabular-nums text-muted">{fmtDeltaPct(a.delta_pct)}</td>
+                    <td className="text-muted py-2 text-right tabular-nums">
+                      {fmtDeltaPct(a.delta_pct)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -158,11 +177,20 @@ export default async function DashboardPage() {
         <Card className="p-4">
           <SectionTitle>Cross-sell white-space</SectionTitle>
           <ul className="space-y-3 text-sm">
-            <WsRow label="Aluminum-only (no steel)" count={steelGap?.branch_count} value={steelGap?.ttm_revenue} />
-            <WsRow label="Steel-only (no aluminum)" count={aluGap?.branch_count} value={aluGap?.ttm_revenue} />
+            <WsRow
+              label="Aluminum-only (no steel)"
+              count={steelGap?.branch_count}
+              value={steelGap?.ttm_revenue}
+            />
+            <WsRow
+              label="Steel-only (no aluminum)"
+              count={aluGap?.branch_count}
+              value={aluGap?.ttm_revenue}
+            />
           </ul>
-          <p className="mt-4 text-xs text-muted">
-            White-space = branches buying one product line but not the other — the clearest cross-sell openings.
+          <p className="text-muted mt-4 text-xs">
+            White-space = branches buying one product line but not the other — the clearest
+            cross-sell openings.
           </p>
         </Card>
       </div>
@@ -172,11 +200,11 @@ export default async function DashboardPage() {
 
 function WsRow({ label, count, value }: { label: string; count?: number; value?: number }) {
   return (
-    <li className="flex items-center justify-between rounded-md bg-canvas px-3 py-2">
+    <li className="bg-canvas flex items-center justify-between rounded-md px-3 py-2">
       <span className="text-charcoal-2">{label}</span>
       <span className="text-right">
-        <span className="font-bold tabular-nums text-charcoal">{count ?? 0}</span>
-        <span className="ml-2 text-xs text-muted">{fmtCurrencyShort(value ?? 0)}</span>
+        <span className="text-charcoal font-bold tabular-nums">{count ?? 0}</span>
+        <span className="text-muted ml-2 text-xs">{fmtCurrencyShort(value ?? 0)}</span>
       </span>
     </li>
   );
@@ -186,8 +214,8 @@ function PageHeader({ role, asOf }: { role: string; asOf?: string }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-2">
       <div>
-        <h1 className="text-xl font-bold tracking-tight text-charcoal">Coverage Dashboard</h1>
-        <p className="text-sm text-muted">
+        <h1 className="text-charcoal text-xl font-bold tracking-tight">Coverage Dashboard</h1>
+        <p className="text-muted text-sm">
           {role === 'rep' ? 'Your book' : 'Full portfolio'} · as of {fmtDate(asOf)}
         </p>
       </div>

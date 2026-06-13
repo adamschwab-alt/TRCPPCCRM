@@ -40,12 +40,7 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="mt-5 space-y-4">
       <Field label="Email" error={errors.email?.message}>
-        <input
-          type="email"
-          autoComplete="email"
-          className="input"
-          {...register('email')}
-        />
+        <input type="email" autoComplete="email" className="input" {...register('email')} />
       </Field>
       <Field label="Password" error={errors.password?.message}>
         <input
@@ -74,7 +69,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-charcoal-2">{label}</span>
+      <span className="text-charcoal-2 mb-1 block text-xs font-medium">{label}</span>
       {children}
       {error && <span className="mt-1 block text-xs text-[var(--color-atrisk)]">{error}</span>}
     </label>

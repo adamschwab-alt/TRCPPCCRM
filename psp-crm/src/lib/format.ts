@@ -12,7 +12,11 @@ export function fmtCurrencyShort(n: number | null | undefined): string {
 
 export function fmtCurrency(n: number | null | undefined): string {
   if (n === null || n === undefined) return '—';
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  return n.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  });
 }
 
 /** delta_pct stored as a ratio; null → "n/m" (no prior). */
@@ -53,4 +57,10 @@ const STATUS_CLASS: Record<BranchStatus, string> = {
 export const statusClass = (s: BranchStatus) => STATUS_CLASS[s] ?? '';
 
 export const whiteSpaceLabel = (w: WhiteSpace) =>
-  w === 'Steel gap' ? 'No steel' : w === 'Alu gap' ? 'No aluminum' : w === 'Both' ? 'No alu/steel' : '—';
+  w === 'Steel gap'
+    ? 'No steel'
+    : w === 'Alu gap'
+      ? 'No aluminum'
+      : w === 'Both'
+        ? 'No alu/steel'
+        : '—';

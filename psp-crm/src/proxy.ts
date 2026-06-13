@@ -71,5 +71,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // Run on everything except Next internals, static assets, and the favicon.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+  ],
 };

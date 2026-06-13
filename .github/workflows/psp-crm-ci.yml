@@ -1,0 +1,28 @@
+name: psp-crm CI
+
+on:
+  push:
+    branches: [claude/psp-coverage-crm-v0-9ln1id, main]
+    paths: ['psp-crm/**', '.github/workflows/psp-crm-ci.yml']
+  pull_request:
+    paths: ['psp-crm/**', '.github/workflows/psp-crm-ci.yml']
+
+defaults:
+  run:
+    working-directory: psp-crm
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: psp-crm/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm test

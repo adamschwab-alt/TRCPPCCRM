@@ -21,18 +21,51 @@ import {
 const HEADER_ALIASES: Record<string, string[]> = {
   date: ['date', 'invoicedate', 'trandate', 'transactiondate', 'orderdate', 'docdate'],
   net_sale: [
-    'netsale', 'netsales', 'amount', 'extprice', 'extendedprice', 'sales', 'revenue',
-    'linetotal', 'saleamount', 'extsales', 'netamount',
+    'netsale',
+    'netsales',
+    'amount',
+    'extprice',
+    'extendedprice',
+    'sales',
+    'revenue',
+    'linetotal',
+    'saleamount',
+    'extsales',
+    'netamount',
   ],
   quantity: ['quantity', 'qty', 'qtyshipped', 'qtyordered'],
   cost: ['cost', 'extcost', 'extendedcost', 'totalcost', 'cogs'],
   margin: ['margin', 'grossmargin', 'gm', 'grossprofit', 'profit', 'gp'],
   status: ['status', 'orderstatus', 'sostatus', 'docstatus', 'invoicestatus'],
   so_type: ['sotype', 'ordertype', 'documenttype', 'doctype', 'type'],
-  account_name: ['account', 'accountname', 'parent', 'parentaccount', 'parentcustomer', 'company', 'nationalaccount'],
-  branch_name: ['branch', 'branchname', 'shipto', 'shiptoname', 'location', 'site', 'store', 'customer', 'customername'],
+  account_name: [
+    'account',
+    'accountname',
+    'parent',
+    'parentaccount',
+    'parentcustomer',
+    'company',
+    'nationalaccount',
+  ],
+  branch_name: [
+    'branch',
+    'branchname',
+    'shipto',
+    'shiptoname',
+    'location',
+    'site',
+    'store',
+    'customer',
+    'customername',
+  ],
   inventory_id: ['inventoryid', 'itemid', 'item', 'sku', 'partnumber', 'partno', 'inventory'],
-  inventory_description: ['inventorydescription', 'description', 'itemdescription', 'itemdesc', 'desc'],
+  inventory_description: [
+    'inventorydescription',
+    'description',
+    'itemdescription',
+    'itemdesc',
+    'desc',
+  ],
   item_class: ['itemclass', 'class', 'category', 'productclass'],
   product_line: ['productline', 'prodline', 'product', 'plgroup', 'familygroup'],
   sales_person: ['salesperson', 'salesrep', 'salesman', 'accountmanager', 'rep'],
@@ -48,7 +81,11 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 function num(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return v;
-  const n = Number(String(v).replace(/[$,()\s]/g, (m) => (m === '(' || m === ')' ? '' : '')).replace(/,/g, ''));
+  const n = Number(
+    String(v)
+      .replace(/[$,()\s]/g, (m) => (m === '(' || m === ')' ? '' : ''))
+      .replace(/,/g, ''),
+  );
   return Number.isFinite(n) ? n : null;
 }
 
@@ -107,10 +144,12 @@ export class FileImportAdapter implements DataSourceAdapter {
       wb.SheetNames.find((n) => norm(n).includes('data')) ??
       wb.SheetNames[0];
     const sheet = wb.Sheets[sheetName];
-    if (!sheet) throw new Error(`Sheet not found: ${sheetName}. Sheets: ${wb.SheetNames.join(', ')}`);
+    if (!sheet)
+      throw new Error(`Sheet not found: ${sheetName}. Sheets: ${wb.SheetNames.join(', ')}`);
 
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null });
-    if (rows.length === 0) return { accounts: [], branches: [], transactions: [], unmappedHeaders: [] };
+    if (rows.length === 0)
+      return { accounts: [], branches: [], transactions: [], unmappedHeaders: [] };
 
     // Resolve which source header feeds each target field (exact normalized match).
     const headers = Object.keys(rows[0]);
@@ -171,12 +210,18 @@ export class FileImportAdapter implements DataSourceAdapter {
 
     if (errors.length) {
       // Surface a capped sample; the seed script prints the full summary.
-      console.warn(`[file-import] ${errors.length} rows failed validation. Sample:\n` + errors.slice(0, 5).join('\n'));
+      console.warn(
+        `[file-import] ${errors.length} rows failed validation. Sample:\n` +
+          errors.slice(0, 5).join('\n'),
+      );
     }
 
     // Derive accounts/branches from the transactions (enriched by explicit sheets below).
     const accountMap = new Map<string, { name: string; primary_state: string | null }>();
-    const branchMap = new Map<string, { account_name: string; name: string; state: string | null; city: string | null }>();
+    const branchMap = new Map<
+      string,
+      { account_name: string; name: string; state: string | null; city: string | null }
+    >();
     for (const t of transactions) {
       if (!accountMap.has(t.account_name)) {
         accountMap.set(t.account_name, { name: t.account_name, primary_state: t.state });

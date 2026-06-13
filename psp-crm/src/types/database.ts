@@ -18,7 +18,7 @@ export type ProfileRow = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-}
+};
 
 export type AccountRow = {
   id: string;
@@ -27,7 +27,7 @@ export type AccountRow = {
   owner_id: string | null;
   created_at: string;
   updated_at: string;
-}
+};
 
 export type BranchRow = {
   id: string;
@@ -38,7 +38,7 @@ export type BranchRow = {
   owner_id: string | null;
   created_at: string;
   updated_at: string;
-}
+};
 
 export type SalesTransactionRow = {
   id: string;
@@ -62,7 +62,7 @@ export type SalesTransactionRow = {
   so_nbr: string | null;
   line_nbr: string | null;
   created_at: string;
-}
+};
 
 export type TargetsRow = {
   id: boolean;
@@ -75,13 +75,13 @@ export type TargetsRow = {
   retention_floor: number;
   cadence_days: number;
   updated_at: string;
-}
+};
 
 export type AppSettingsRow = {
   id: boolean;
   as_of_date: string;
   updated_at: string;
-}
+};
 
 export type BranchMetricsRow = {
   branch_id: string;
@@ -103,7 +103,7 @@ export type BranchMetricsRow = {
   status: BranchStatus;
   coverage_rag: CoverageRag;
   white_space: WhiteSpace;
-}
+};
 
 export type AccountMetricsRow = {
   account_id: string;
@@ -123,7 +123,7 @@ export type AccountMetricsRow = {
   days_idle: number | null;
   status: BranchStatus;
   coverage_rag: CoverageRag;
-}
+};
 
 export type PortfolioKpisRow = {
   current_book: number;
@@ -139,13 +139,13 @@ export type PortfolioKpisRow = {
   grr: number | null;
   nrr: number | null;
   gm_pct: number | null;
-}
+};
 
 export type WhitespaceSummaryRow = {
   white_space: WhiteSpace;
   branch_count: number;
   ttm_revenue: number;
-}
+};
 
 type TableDef<Row, Insert = Partial<Row>, Update = Partial<Row>> = {
   Row: Row;

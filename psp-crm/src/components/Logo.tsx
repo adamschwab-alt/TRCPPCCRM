@@ -5,12 +5,12 @@
 export function Logo({ className = '' }: { className?: string }) {
   return (
     <span className={`inline-flex items-center gap-2 ${className}`}>
-      <span className="flex h-7 w-7 items-center justify-center rounded-sm bg-brand font-mono text-sm font-bold text-white">
+      <span className="bg-brand flex h-7 w-7 items-center justify-center rounded-sm font-mono text-sm font-bold text-white">
         PS
       </span>
       <span className="flex flex-col leading-none">
-        <span className="text-sm font-bold tracking-tight text-charcoal">PACIFIC SHORING</span>
-        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted">
+        <span className="text-charcoal text-sm font-bold tracking-tight">PACIFIC SHORING</span>
+        <span className="text-muted text-[10px] font-medium tracking-[0.2em] uppercase">
           Coverage CRM
         </span>
       </span>

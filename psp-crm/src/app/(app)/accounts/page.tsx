@@ -18,15 +18,15 @@ export default async function AccountsPage() {
     <div>
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-charcoal">Accounts</h1>
-          <p className="text-sm text-muted">{accounts.length} parent accounts · read-only</p>
+          <h1 className="text-charcoal text-xl font-bold tracking-tight">Accounts</h1>
+          <p className="text-muted text-sm">{accounts.length} parent accounts · read-only</p>
         </div>
       </div>
 
       <Card className="mt-5 overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
-            <tr className="border-b border-line text-left text-xs uppercase text-muted">
+            <tr className="border-line text-muted border-b text-left text-xs uppercase">
               <th className="px-4 py-2.5">Account</th>
               <th className="px-4 py-2.5">State</th>
               <th className="px-4 py-2.5 text-right">Branches</th>
@@ -40,16 +40,26 @@ export default async function AccountsPage() {
           </thead>
           <tbody>
             {accounts.map((a) => (
-              <tr key={a.account_id} className="border-b border-line/60 last:border-0 hover:bg-canvas">
+              <tr
+                key={a.account_id}
+                className="border-line/60 hover:bg-canvas border-b last:border-0"
+              >
                 <td className="px-4 py-2.5">
-                  <Link href={`/accounts/${a.account_id}`} className="font-medium text-brand-700 hover:underline">
+                  <Link
+                    href={`/accounts/${a.account_id}`}
+                    className="text-brand-700 font-medium hover:underline"
+                  >
                     {a.account_name}
                   </Link>
                 </td>
-                <td className="px-4 py-2.5 text-muted">{a.primary_state ?? '—'}</td>
+                <td className="text-muted px-4 py-2.5">{a.primary_state ?? '—'}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums">{a.branch_count}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{fmtCurrencyShort(a.ttm_revenue)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">{fmtCurrencyShort(a.prior_revenue)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums">
+                  {fmtCurrencyShort(a.ttm_revenue)}
+                </td>
+                <td className="text-muted px-4 py-2.5 text-right tabular-nums">
+                  {fmtCurrencyShort(a.prior_revenue)}
+                </td>
                 <td
                   className={`px-4 py-2.5 text-right tabular-nums ${
                     a.delta < 0 ? 'text-[var(--color-atrisk)]' : 'text-[var(--color-ontrack)]'
@@ -63,12 +73,14 @@ export default async function AccountsPage() {
                 <td className="px-4 py-2.5">
                   <RagBadge rag={a.coverage_rag} />
                 </td>
-                <td className="px-4 py-2.5 text-muted">{a.owner_id ? ownerName.get(a.owner_id) ?? '—' : '—'}</td>
+                <td className="text-muted px-4 py-2.5">
+                  {a.owner_id ? (ownerName.get(a.owner_id) ?? '—') : '—'}
+                </td>
               </tr>
             ))}
             {accounts.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-muted">
+                <td colSpan={9} className="text-muted px-4 py-8 text-center">
                   No accounts yet — seed the workbook.
                 </td>
               </tr>
