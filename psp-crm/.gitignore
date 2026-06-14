@@ -45,3 +45,6 @@ next-env.d.ts
 
 # Generated load artifacts (contain customer data)
 /supabase/setup_full.sql
+
+# Generated demo snapshot (contains customer data)
+/psp-dashboard-demo.html
