@@ -1,4 +1,5 @@
-import 'server-only';
+// NOTE: server-only module (uses node:fs + xlsx). Not guarded with 'server-only'
+// because the seed/generator scripts import it under plain Node.
 import * as XLSX from 'xlsx';
 import { readFileSync } from 'node:fs';
 import {

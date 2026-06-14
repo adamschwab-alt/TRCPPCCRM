@@ -1,4 +1,5 @@
-import 'server-only';
+// Server-only logic, but not guarded with 'server-only' because the seed script
+// imports it under plain Node (where that guard throws).
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
 import type { ImportDataset } from '@/lib/adapters';

@@ -42,3 +42,6 @@ next-env.d.ts
 
 # Uploaded workbooks / local data
 /data/
+
+# Generated load artifacts (contain customer data)
+/supabase/setup_full.sql
