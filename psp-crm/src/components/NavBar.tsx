@@ -11,9 +11,9 @@ type NavItem = { href: string; label: string; soon?: boolean };
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/accounts', label: 'Accounts' },
-  { href: '/worklists', label: 'Worklists', soon: true },
-  { href: '/pipeline', label: 'Pipeline', soon: true },
-  { href: '/activities', label: 'Activities', soon: true },
+  { href: '/worklists', label: 'Worklists' },
+  { href: '/pipeline', label: 'Pipeline' },
+  { href: '/activities', label: 'Activities' },
 ];
 
 export function NavBar({
@@ -27,7 +27,7 @@ export function NavBar({
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const items = role === 'admin' ? [...NAV, { href: '/admin', label: 'Admin', soon: true }] : NAV;
+  const items = role === 'admin' ? [...NAV, { href: '/admin', label: 'Admin' }] : NAV;
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 
