@@ -5,20 +5,58 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 function parseCSV(text) {
-  const rows = []; let row = []; let field = ''; let i = 0; let inQ = false;
+  const rows = [];
+  let row = [];
+  let field = '';
+  let i = 0;
+  let inQ = false;
   while (i < text.length) {
     const c = text[i];
     if (inQ) {
-      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
-      field += c; i++; continue;
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQ = false;
+        i++;
+        continue;
+      }
+      field += c;
+      i++;
+      continue;
     }
-    if (c === '"') { inQ = true; i++; continue; }
-    if (c === ',') { row.push(field); field = ''; i++; continue; }
-    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
-    if (c === '\r') { i++; continue; }
-    field += c; i++;
+    if (c === '"') {
+      inQ = true;
+      i++;
+      continue;
+    }
+    if (c === ',') {
+      row.push(field);
+      field = '';
+      i++;
+      continue;
+    }
+    if (c === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      i++;
+      continue;
+    }
+    if (c === '\r') {
+      i++;
+      continue;
+    }
+    field += c;
+    i++;
   }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
   return rows;
 }
 
@@ -31,57 +69,155 @@ const bodyRows = csv.slice(1).filter((r) => r.length === header.length);
 const nullify = (v) => (v === '' ? null : v);
 for (let s = 0; s < bodyRows.length; s += 1000) {
   const batch = bodyRows.slice(s, s + 1000);
-  const vals = []; const params = []; let p = 1;
-  for (const r of batch) { vals.push(`(${header.map(() => `$${p++}`).join(',')})`); params.push(...r.map(nullify)); }
-  await db.query(`insert into sales_transactions (${header.join(',')}) values ${vals.join(',')}`, params);
+  const vals = [];
+  const params = [];
+  let p = 1;
+  for (const r of batch) {
+    vals.push(`(${header.map(() => `$${p++}`).join(',')})`);
+    params.push(...r.map(nullify));
+  }
+  await db.query(
+    `insert into sales_transactions (${header.join(',')}) values ${vals.join(',')}`,
+    params,
+  );
 }
 const one = async (sql) => (await db.query(sql)).rows[0];
 const all = async (sql) => (await db.query(sql)).rows;
 
 const kpis = await one('select * from portfolio_kpis');
 const T = await one('select * from targets');
-const pastCadence = Number((await one('select count(*) n from branch_metrics where days_idle > (select cadence_days from targets)')).n);
-const leak = await all('select account_name, ttm_revenue, prior_revenue, delta, delta_pct from account_metrics where delta < 0 order by delta asc limit 10');
-const ws = Object.fromEntries((await all('select * from whitespace_summary')).map((w) => [w.white_space, w]));
-const accounts = await all('select account_id, account_name, primary_state, branch_count, ttm_revenue, prior_revenue, delta, delta_pct, status, coverage_rag from account_metrics order by ttm_revenue desc');
-const branches = await all('select account_id, branch_name, city, state, ttm_revenue, delta_pct, days_idle, status, coverage_rag, white_space from branch_metrics');
+const pastCadence = Number(
+  (
+    await one(
+      'select count(*) n from branch_metrics where days_idle > (select cadence_days from targets)',
+    )
+  ).n,
+);
+const leak = await all(
+  'select account_name, ttm_revenue, prior_revenue, delta, delta_pct from account_metrics where delta < 0 order by delta asc limit 10',
+);
+const ws = Object.fromEntries(
+  (await all('select * from whitespace_summary')).map((w) => [w.white_space, w]),
+);
+const accounts = await all(
+  'select account_id, account_name, primary_state, branch_count, ttm_revenue, prior_revenue, delta, delta_pct, status, coverage_rag from account_metrics order by ttm_revenue desc',
+);
+const branches = await all(
+  'select account_id, branch_name, city, state, ttm_revenue, delta_pct, days_idle, status, coverage_rag, white_space from branch_metrics',
+);
 await db.close();
 
 const branchesByAccount = {};
 for (const b of branches) (branchesByAccount[b.account_id] ||= []).push(b);
-for (const id in branchesByAccount) branchesByAccount[id].sort((a, b) => +b.ttm_revenue - +a.ttm_revenue);
+for (const id in branchesByAccount)
+  branchesByAccount[id].sort((a, b) => +b.ttm_revenue - +a.ttm_revenue);
 
 // ── formatters ──
-const money = (n) => { if (n == null) return '—'; const a = Math.abs(+n), s = +n < 0 ? '-' : ''; if (a >= 1e6) return s + '$' + (a / 1e6).toFixed(2) + 'M'; if (a >= 1e3) return s + '$' + (a / 1e3).toFixed(0) + 'K'; return s + '$' + a.toFixed(0); };
-const pct = (r, d = 1) => r == null ? '—' : (+r * 100).toFixed(d) + '%';
-const dpct = (r) => r == null ? 'n/m' : (+r * 100 >= 0 ? '+' : '') + (+r * 100).toFixed(0) + '%';
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const money = (n) => {
+  if (n == null) return '—';
+  const a = Math.abs(+n),
+    s = +n < 0 ? '-' : '';
+  if (a >= 1e6) return s + '$' + (a / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return s + '$' + (a / 1e3).toFixed(0) + 'K';
+  return s + '$' + a.toFixed(0);
+};
+const pct = (r, d = 1) => (r == null ? '—' : (+r * 100).toFixed(d) + '%');
+const dpct = (r) => (r == null ? 'n/m' : (+r * 100 >= 0 ? '+' : '') + (+r * 100).toFixed(0) + '%');
+const esc = (s) =>
+  String(s == null ? '' : s).replace(
+    /[&<>"]/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c],
+  );
 const cls = (s) => 's-' + String(s).replace(/[^A-Za-z]/g, '');
 const ccls = (s) => 'c-' + String(s).replace(/[^A-Za-z]/g, '');
-const tone = (v, t, dir) => v == null ? '' : dir === 'gte' ? (+v >= t ? 'good' : +v >= t * 0.9 ? 'warn' : 'bad') : (+v <= t ? 'good' : +v <= t * 1.3 ? 'warn' : 'bad');
-const wsLabel = (w) => w === 'Steel gap' ? 'No steel' : w === 'Alu gap' ? 'No aluminum' : w === 'Both' ? 'No alu/steel' : '—';
-const tile = (lab, val, sub, toneCls, flag) => `<div class="card tile${flag ? ' ring' : ''}"><div class="lab"><span>${lab}</span>${flag ? '<span class="flag">Flagship</span>' : ''}</div><div class="val ${toneCls || ''}">${val}</div><p class="sub">${sub || ''}</p></div>`;
+const tone = (v, t, dir) =>
+  v == null
+    ? ''
+    : dir === 'gte'
+      ? +v >= t
+        ? 'good'
+        : +v >= t * 0.9
+          ? 'warn'
+          : 'bad'
+      : +v <= t
+        ? 'good'
+        : +v <= t * 1.3
+          ? 'warn'
+          : 'bad';
+const wsLabel = (w) =>
+  w === 'Steel gap'
+    ? 'No steel'
+    : w === 'Alu gap'
+      ? 'No aluminum'
+      : w === 'Both'
+        ? 'No alu/steel'
+        : '—';
+const tile = (lab, val, sub, toneCls, flag) =>
+  `<div class="card tile${flag ? ' ring' : ''}"><div class="lab"><span>${lab}</span>${flag ? '<span class="flag">Flagship</span>' : ''}</div><div class="val ${toneCls || ''}">${val}</div><p class="sub">${sub || ''}</p></div>`;
 
 const tiles = [
-  tile('Current book (TTM)', money(kpis.current_book), `Prior ${money(kpis.prior_book)} · <b class="${+kpis.yoy >= 0 ? 'good' : 'bad'}">${dpct(kpis.yoy)} YoY</b>`),
-  tile('GRR', pct(kpis.grr), `Target ${pct(T.grr_target, 0)}`, tone(kpis.grr, +T.grr_target, 'gte'), true),
-  tile('NRR', pct(kpis.nrr), `Target ${pct(T.nrr_target, 0)}`, tone(kpis.nrr, +T.nrr_target, 'gte')),
+  tile(
+    'Current book (TTM)',
+    money(kpis.current_book),
+    `Prior ${money(kpis.prior_book)} · <b class="${+kpis.yoy >= 0 ? 'good' : 'bad'}">${dpct(kpis.yoy)} YoY</b>`,
+  ),
+  tile(
+    'GRR',
+    pct(kpis.grr),
+    `Target ${pct(T.grr_target, 0)}`,
+    tone(kpis.grr, +T.grr_target, 'gte'),
+    true,
+  ),
+  tile(
+    'NRR',
+    pct(kpis.nrr),
+    `Target ${pct(T.nrr_target, 0)}`,
+    tone(kpis.nrr, +T.nrr_target, 'gte'),
+  ),
   tile('Gross margin', pct(kpis.gm_pct), 'TTM blended'),
-  tile('Contraction', money(kpis.contraction), `Ceiling ${money(T.contraction_ceiling)}`, tone(kpis.contraction, +T.contraction_ceiling, 'lte')),
+  tile(
+    'Contraction',
+    money(kpis.contraction),
+    `Ceiling ${money(T.contraction_ceiling)}`,
+    tone(kpis.contraction, +T.contraction_ceiling, 'lte'),
+  ),
   tile('Expansion', money(kpis.expansion), 'Growth in retained', 'good'),
-  tile('New business', money(kpis.new_business), `${kpis.new_accounts} new · target ${money(T.new_biz_target)}`, tone(kpis.new_business, +T.new_biz_target, 'gte')),
-  tile('Past reorder cadence', String(pastCadence), `Branches idle > ${T.cadence_days}d`, pastCadence > 0 ? 'warn' : 'good'),
+  tile(
+    'New business',
+    money(kpis.new_business),
+    `${kpis.new_accounts} new · target ${money(T.new_biz_target)}`,
+    tone(kpis.new_business, +T.new_biz_target, 'gte'),
+  ),
+  tile(
+    'Past reorder cadence',
+    String(pastCadence),
+    `Branches idle > ${T.cadence_days}d`,
+    pastCadence > 0 ? 'warn' : 'good',
+  ),
 ].join('');
 
-const leakRows = leak.map((a) => `<tr><td>${esc(a.account_name)}</td><td class="r">${money(a.ttm_revenue)}</td><td class="r mut">${money(a.prior_revenue)}</td><td class="r bad">${money(a.delta)}</td><td class="r mut">${dpct(a.delta_pct)}</td></tr>`).join('');
-const wsRow = (lab, w) => `<div class="pill"><span>${lab}</span><span><b>${w ? w.branch_count : 0}</b> &nbsp;<span class="mut">${money(w ? w.ttm_revenue : 0)}</span></span></div>`;
+const leakRows = leak
+  .map(
+    (a) =>
+      `<tr><td>${esc(a.account_name)}</td><td class="r">${money(a.ttm_revenue)}</td><td class="r mut">${money(a.prior_revenue)}</td><td class="r bad">${money(a.delta)}</td><td class="r mut">${dpct(a.delta_pct)}</td></tr>`,
+  )
+  .join('');
+const wsRow = (lab, w) =>
+  `<div class="pill"><span>${lab}</span><span><b>${w ? w.branch_count : 0}</b> &nbsp;<span class="mut">${money(w ? w.ttm_revenue : 0)}</span></span></div>`;
 
-const accountBlocks = accounts.map((a) => {
-  const bs = branchesByAccount[a.account_id] || [];
-  const brows = bs.map((b) => `<tr><td>${esc(b.branch_name)}</td><td class="mut">${esc([b.city, b.state].filter(Boolean).join(', ')) || '—'}</td><td class="r">${money(b.ttm_revenue)}</td><td class="r ${b.delta_pct != null && +b.delta_pct < 0 ? 'bad' : 'good'}">${dpct(b.delta_pct)}</td><td class="r mut">${b.days_idle == null ? '—' : b.days_idle + 'd'}</td><td><span class="tag ${cls(b.status)}">${b.status}</span></td><td class="mut">${wsLabel(b.white_space)}</td></tr>`).join('');
-  return `<details class="acct"><summary><span class="aname">${esc(a.account_name)}</span><span class="ameta"><span class="tag ${cls(a.status)}">${a.status}</span> <span class="tag ${ccls(a.coverage_rag)}">${a.coverage_rag}</span> <b>${money(a.ttm_revenue)}</b> <span class="mut ${+a.delta < 0 ? 'bad' : 'good'}">${dpct(a.delta_pct)}</span></span></summary>
+const accountBlocks = accounts
+  .map((a) => {
+    const bs = branchesByAccount[a.account_id] || [];
+    const brows = bs
+      .map(
+        (b) =>
+          `<tr><td>${esc(b.branch_name)}</td><td class="mut">${esc([b.city, b.state].filter(Boolean).join(', ')) || '—'}</td><td class="r">${money(b.ttm_revenue)}</td><td class="r ${b.delta_pct != null && +b.delta_pct < 0 ? 'bad' : 'good'}">${dpct(b.delta_pct)}</td><td class="r mut">${b.days_idle == null ? '—' : b.days_idle + 'd'}</td><td><span class="tag ${cls(b.status)}">${b.status}</span></td><td class="mut">${wsLabel(b.white_space)}</td></tr>`,
+      )
+      .join('');
+    return `<details class="acct"><summary><span class="aname">${esc(a.account_name)}</span><span class="ameta"><span class="tag ${cls(a.status)}">${a.status}</span> <span class="tag ${ccls(a.coverage_rag)}">${a.coverage_rag}</span> <b>${money(a.ttm_revenue)}</b> <span class="mut ${+a.delta < 0 ? 'bad' : 'good'}">${dpct(a.delta_pct)}</span></span></summary>
     <div class="overflow"><table><thead><tr><th>Branch</th><th>Location</th><th class="r">TTM</th><th class="r">Δ%</th><th class="r">Idle</th><th>Status</th><th>White-space</th></tr></thead><tbody>${brows || '<tr><td colspan="7" class="mut">No branches</td></tr>'}</tbody></table></div></details>`;
-}).join('');
+  })
+  .join('');
 
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -129,4 +265,8 @@ details.acct[open]>summary .aname::before{content:"▾ "}
 </div></body></html>`;
 
 writeFileSync('psp-dashboard-demo.html', html);
-console.log('wrote psp-dashboard-demo.html (' + (html.length / 1024).toFixed(0) + ' KB) — fully static, no JS');
+console.log(
+  'wrote psp-dashboard-demo.html (' +
+    (html.length / 1024).toFixed(0) +
+    ' KB) — fully static, no JS',
+);
