@@ -34,6 +34,13 @@ export default async function BranchDetailPage({ params }: { params: Promise<{ i
         <span className="text-muted text-sm">
           {[branch.city, branch.state].filter(Boolean).join(', ')}
         </span>
+        <Link
+          href={`/branches/${branch.branch_id}/edit`}
+          className="btn-secondary ml-auto px-3 py-1 text-xs"
+          data-tap
+        >
+          Edit
+        </Link>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">

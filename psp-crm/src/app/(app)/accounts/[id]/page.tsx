@@ -22,6 +22,22 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
         <StatusBadge status={account.status} />
         <RagBadge rag={account.coverage_rag} />
         <span className="text-muted text-sm">{account.primary_state ?? ''}</span>
+        <span className="ml-auto flex gap-2">
+          <Link
+            href={`/accounts/${account.account_id}/edit`}
+            className="btn-secondary px-3 py-1 text-xs"
+            data-tap
+          >
+            Edit
+          </Link>
+          <Link
+            href={`/branches/new?account=${account.account_id}`}
+            className="btn-primary px-3 py-1 text-xs"
+            data-tap
+          >
+            + Add branch
+          </Link>
+        </span>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">

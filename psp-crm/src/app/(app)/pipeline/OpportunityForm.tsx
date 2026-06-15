@@ -25,7 +25,10 @@ export function OpportunityForm({
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   const [accountId, setAccountId] = useState(opp?.account_id ?? '');
+  const [closeDate, setCloseDate] = useState(opp?.expected_close ?? '');
   const [stage, setStage] = useState(opp?.stage ?? 'Qualified');
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const pastClose = closeDate !== '' && closeDate < todayIso;
   const [winPct, setWinPct] = useState(
     opp?.win_prob != null
       ? String(Math.round(opp.win_prob * 100))
@@ -46,7 +49,13 @@ export function OpportunityForm({
   return (
     <form action={formAction} className="mt-5 max-w-2xl space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Account *">
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 flex items-center justify-between text-xs font-medium">
+            <span>Account *</span>
+            <Link href="/accounts/new" className="text-brand-700 hover:underline" target="_blank">
+              + New account
+            </Link>
+          </span>
           <select
             name="account_id"
             required
@@ -61,7 +70,7 @@ export function OpportunityForm({
               </option>
             ))}
           </select>
-        </Field>
+        </label>
         <Field label="Branch (optional)">
           <select name="branch_id" className="input" defaultValue={opp?.branch_id ?? ''}>
             <option value="">— none —</option>
@@ -149,8 +158,14 @@ export function OpportunityForm({
             name="expected_close"
             type="date"
             className="input"
-            defaultValue={opp?.expected_close ?? ''}
+            value={closeDate}
+            onChange={(e) => setCloseDate(e.target.value)}
           />
+          {pastClose && (
+            <span className="mt-1 block text-xs text-[var(--color-watch)]">
+              ⚠️ This close date is in the past — that&rsquo;s allowed, just double-check it.
+            </span>
+          )}
         </Field>
         <Field label="Next step">
           <input

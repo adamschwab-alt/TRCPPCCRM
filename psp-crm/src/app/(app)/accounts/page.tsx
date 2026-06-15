@@ -16,11 +16,14 @@ export default async function AccountsPage() {
 
   return (
     <div>
-      <div className="flex items-end justify-between">
+      <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-charcoal text-xl font-bold tracking-tight">Accounts</h1>
-          <p className="text-muted text-sm">{accounts.length} parent accounts · read-only</p>
+          <p className="text-muted text-sm">{accounts.length} parent accounts</p>
         </div>
+        <Link href="/accounts/new" className="btn-primary" data-tap>
+          + New account
+        </Link>
       </div>
 
       <Card className="mt-5 overflow-x-auto">
