@@ -5,8 +5,39 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/auth';
+import { runImport } from '@/lib/import/run-import';
+import { AcumaticaODataAdapter } from '@/lib/adapters/acumatica';
 
 export type FormState = { error?: string; ok?: boolean; message?: string };
+
+/**
+ * Pull new sales from the Acumatica OData feed and upsert them. Runs as the
+ * admin's RLS session (staff may write transactions), so no service-role key
+ * is needed for the manual button. Idempotent — re-running only adds new rows.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function syncNow(_prev: FormState, _formData: FormData): Promise<FormState> {
+  await requireRole('admin');
+  const supabase = await createClient();
+  try {
+    const dataset = await new AcumaticaODataAdapter().load();
+    if (dataset.transactions.length === 0) {
+      return {
+        ok: true,
+        message: 'Connected, but the feed returned 0 rows — check the inquiry/endpoint.',
+      };
+    }
+    const summary = await runImport(supabase, dataset);
+    revalidatePath('/dashboard');
+    revalidatePath('/admin');
+    return {
+      ok: true,
+      message: `Synced ${summary.transactions.total} rows: +${summary.transactions.inserted} new, ${summary.transactions.skippedDuplicates} already present. As-of ${summary.asOfDate}.`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Sync failed' };
+  }
+}
 
 const num = (v: unknown) => z.coerce.number().parse(v);
 

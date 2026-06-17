@@ -1,0 +1,33 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { runImport } from '@/lib/import/run-import';
+import { AcumaticaODataAdapter } from '@/lib/adapters/acumatica';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // seconds (Vercel Pro). Hobby caps lower.
+
+/**
+ * Scheduled live sync. Triggered by Vercel Cron (see vercel.json). Secured by
+ * CRON_SECRET: Vercel sends it as `Authorization: Bearer <CRON_SECRET>`.
+ * Runs with the service role (no user session), so SUPABASE_SERVICE_ROLE_KEY
+ * must be set in the deployment.
+ */
+export async function GET(request: NextRequest) {
+  const secret = process.env.CRON_SECRET;
+  const auth = request.headers.get('authorization');
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const dataset = await new AcumaticaODataAdapter().load();
+    const supabase = createAdminClient();
+    const summary = await runImport(supabase, dataset);
+    return NextResponse.json({ ok: true, summary });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : 'sync failed' },
+      { status: 500 },
+    );
+  }
+}

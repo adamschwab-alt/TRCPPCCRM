@@ -2,7 +2,7 @@ import { Card, SectionTitle } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { getProfiles, getTargets, getAuditLog } from '@/lib/admin/queries';
 import { updateUser } from './actions';
-import { TargetsForm, InviteForm } from './AdminForms';
+import { TargetsForm, InviteForm, SyncForm } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +29,11 @@ export default async function AdminPage() {
         ) : (
           <p className="text-muted text-sm">No targets row found.</p>
         )}
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Data sync (Acumatica OData)</SectionTitle>
+        <SyncForm />
       </Card>
 
       <Card className="p-4">

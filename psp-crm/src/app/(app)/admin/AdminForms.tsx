@@ -1,8 +1,29 @@
 'use client';
 
 import { useActionState } from 'react';
-import { updateTargets, inviteUser, type FormState } from './actions';
+import { updateTargets, inviteUser, syncNow, type FormState } from './actions';
 import type { TargetsRow } from '@/types/database';
+
+export function SyncForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(syncNow, {});
+  return (
+    <form action={action} className="space-y-3">
+      <p className="text-muted text-xs">
+        Pulls new sales from the Acumatica OData feed and refreshes every metric. Safe to run
+        anytime — it only adds rows it hasn&rsquo;t seen.
+      </p>
+      {state.error && <p className="text-sm text-[var(--color-atrisk)]">{state.error}</p>}
+      {state.ok && (
+        <p className="rounded-md bg-[var(--color-ontrack-bg)] p-2 text-sm text-[var(--color-ontrack)]">
+          {state.message}
+        </p>
+      )}
+      <button type="submit" disabled={pending} className="btn-primary" data-tap>
+        {pending ? 'Syncing…' : 'Sync now'}
+      </button>
+    </form>
+  );
+}
 
 function Num({
   label,
