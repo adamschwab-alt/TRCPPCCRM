@@ -30,9 +30,14 @@ export default async function PipelinePage() {
             {open.length} open · {opps.length} total opportunities
           </p>
         </div>
-        <Link href="/pipeline/new" className="btn-primary" data-tap>
-          + New opportunity
-        </Link>
+        <div className="flex items-center gap-2">
+          <a href="/export/pipeline" className="btn-secondary" data-tap>
+            ⬇ Excel
+          </a>
+          <Link href="/pipeline/new" className="btn-primary" data-tap>
+            + New opportunity
+          </Link>
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -21,9 +21,17 @@ export default async function AccountsPage() {
           <h1 className="text-charcoal text-xl font-bold tracking-tight">Accounts</h1>
           <p className="text-muted text-sm">{accounts.length} parent accounts</p>
         </div>
-        <Link href="/accounts/new" className="btn-primary" data-tap>
-          + New account
-        </Link>
+        <div className="flex items-center gap-2">
+          <a href="/export/accounts" className="btn-secondary" data-tap>
+            ⬇ Accounts
+          </a>
+          <a href="/export/branches" className="btn-secondary" data-tap>
+            ⬇ Branches
+          </a>
+          <Link href="/accounts/new" className="btn-primary" data-tap>
+            + New account
+          </Link>
+        </div>
       </div>
 
       <Card className="mt-5 overflow-x-auto">
