@@ -57,11 +57,24 @@ export class AcumaticaODataAdapter implements DataSourceAdapter {
         const body = await res.text().catch(() => '');
         throw new Error(`Acumatica OData ${res.status} ${res.statusText}: ${body.slice(0, 300)}`);
       }
-      const json: { value?: Record<string, unknown>[]; ['@odata.nextLink']?: string } =
-        await res.json();
-      if (Array.isArray(json.value)) records.push(...json.value);
-      else if (Array.isArray(json)) records.push(...(json as unknown as Record<string, unknown>[]));
-      next = json['@odata.nextLink'] ?? null;
+      // Acumatica's /OData/<tenant>/ feed is OData v3. Depending on the
+      // negotiated format the rows live under `value` (light) or `d.results`
+      // (verbose), and paging is `@odata.nextLink` or `d.__next`.
+      const json: {
+        value?: Record<string, unknown>[];
+        ['@odata.nextLink']?: string;
+        d?: { results?: Record<string, unknown>[]; __next?: string };
+      } = await res.json();
+
+      const page = Array.isArray(json.value)
+        ? json.value
+        : Array.isArray(json.d?.results)
+          ? json.d!.results!
+          : Array.isArray(json)
+            ? (json as unknown as Record<string, unknown>[])
+            : [];
+      records.push(...page);
+      next = json['@odata.nextLink'] ?? json.d?.__next ?? null;
     }
 
     return datasetFromRecords(records);
