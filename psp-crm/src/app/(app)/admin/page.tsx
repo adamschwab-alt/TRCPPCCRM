@@ -106,6 +106,7 @@ export default async function AdminPage() {
               <thead>
                 <tr className="border-line text-muted border-b text-left text-xs uppercase">
                   <th className="px-3 py-2">When</th>
+                  <th className="px-3 py-2">Who</th>
                   <th className="px-3 py-2">Action</th>
                   <th className="px-3 py-2">Entity</th>
                 </tr>
@@ -114,9 +115,10 @@ export default async function AdminPage() {
                 {audit.map((a) => (
                   <tr key={a.id} className="border-line/60 border-b last:border-0">
                     <td className="text-muted px-3 py-2">{fmtDate(a.created_at.slice(0, 10))}</td>
-                    <td className="px-3 py-2">{a.action}</td>
+                    <td className="px-3 py-2">{a.actor_name ?? '—'}</td>
+                    <td className="px-3 py-2 capitalize">{a.action}</td>
                     <td className="text-muted px-3 py-2">
-                      {a.entity ?? '—'} {a.entity_id ?? ''}
+                      {a.entity ?? '—'} {a.entity_id ? a.entity_id.slice(0, 8) : ''}
                     </td>
                   </tr>
                 ))}

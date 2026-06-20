@@ -29,13 +29,20 @@ export default async function ActivitiesPage() {
 
   return (
     <div>
-      <h1 className="text-charcoal text-xl font-bold tracking-tight">Activities &amp; tasks</h1>
-      <p className="text-muted text-sm">
-        Your day: {open.length} open task{open.length === 1 ? '' : 's'}
-        {overdue.length > 0 && (
-          <span className="text-[var(--color-atrisk)]"> · {overdue.length} overdue</span>
-        )}
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-charcoal text-xl font-bold tracking-tight">Activities &amp; tasks</h1>
+          <p className="text-muted text-sm">
+            Your day: {open.length} open task{open.length === 1 ? '' : 's'}
+            {overdue.length > 0 && (
+              <span className="text-[var(--color-atrisk)]"> · {overdue.length} overdue</span>
+            )}
+          </p>
+        </div>
+        <a href="/export/activities" className="btn-secondary" data-tap>
+          ⬇ Excel
+        </a>
+      </div>
 
       <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: quick add forms */}

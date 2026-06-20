@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { requireSession } from '@/lib/auth';
+import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string };
 
@@ -76,8 +77,13 @@ export async function createOpportunity(_prev: FormState, formData: FormData): P
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
 
   const supabase = await createClient();
-  const { error } = await supabase.from('opportunities').insert(toRow(parsed.data, userId));
+  const row = toRow(parsed.data, userId);
+  const { data, error } = await supabase.from('opportunities').insert(row).select('id').single();
   if (error) return { error: error.message };
+  await logAudit(supabase, 'create', 'opportunity', data?.id ?? null, {
+    stage: row.stage,
+    amount: row.amount,
+  });
 
   revalidatePath('/pipeline');
   redirect('/pipeline');
@@ -93,11 +99,10 @@ export async function updateOpportunity(
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from('opportunities')
-    .update(toRow(parsed.data, userId))
-    .eq('id', id);
+  const row = toRow(parsed.data, userId);
+  const { error } = await supabase.from('opportunities').update(row).eq('id', id);
   if (error) return { error: error.message };
+  await logAudit(supabase, 'update', 'opportunity', id, { stage: row.stage, amount: row.amount });
 
   revalidatePath('/pipeline');
   redirect('/pipeline');
@@ -107,6 +112,7 @@ export async function deleteOpportunity(id: string): Promise<void> {
   await requireSession();
   const supabase = await createClient();
   await supabase.from('opportunities').delete().eq('id', id);
+  await logAudit(supabase, 'delete', 'opportunity', id);
   revalidatePath('/pipeline');
   redirect('/pipeline');
 }

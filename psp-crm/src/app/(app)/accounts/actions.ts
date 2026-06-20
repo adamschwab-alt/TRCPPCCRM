@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { requireSession, isStaff } from '@/lib/auth';
+import { logAudit } from '@/lib/audit';
 import type { AccountRow, BranchRow, UserRole } from '@/types/database';
 
 export type FormState = { error?: string };
@@ -50,6 +51,7 @@ export async function createAccount(_prev: FormState, formData: FormData): Promi
     .select('id')
     .single();
   if (error) return { error: error.message };
+  await logAudit(supabase, 'create', 'account', data?.id ?? null, { name: parsed.data.name });
 
   revalidatePath('/accounts');
   redirect(`/accounts/${data!.id}`);
@@ -76,6 +78,7 @@ export async function updateAccount(
   if (isStaff(profile.role)) patch.owner_id = parsed.data.owner_id; // only staff reassign owners
   const { error } = await supabase.from('accounts').update(patch).eq('id', id);
   if (error) return { error: error.message };
+  await logAudit(supabase, 'update', 'account', id, { name: parsed.data.name });
 
   revalidatePath('/accounts');
   redirect(`/accounts/${id}`);
@@ -101,6 +104,10 @@ export async function createBranch(_prev: FormState, formData: FormData): Promis
     owner_id: resolveOwner(profile.role, userId, parsed.data.owner_id),
   });
   if (error) return { error: error.message };
+  await logAudit(supabase, 'create', 'branch', null, {
+    name: parsed.data.name,
+    account_id: parsed.data.account_id,
+  });
 
   revalidatePath(`/accounts/${parsed.data.account_id}`);
   redirect(`/accounts/${parsed.data.account_id}`);
@@ -131,6 +138,7 @@ export async function updateBranch(
   if (isStaff(profile.role)) patch.owner_id = parsed.data.owner_id;
   const { error } = await supabase.from('branches').update(patch).eq('id', id);
   if (error) return { error: error.message };
+  await logAudit(supabase, 'update', 'branch', id, { name: parsed.data.name });
 
   revalidatePath(`/branches/${id}`);
   redirect(`/branches/${id}`);

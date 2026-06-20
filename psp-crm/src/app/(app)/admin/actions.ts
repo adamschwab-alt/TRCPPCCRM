@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/auth';
 import { runImport } from '@/lib/import/run-import';
 import { AcumaticaODataAdapter } from '@/lib/adapters/acumatica';
+import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string; ok?: boolean; message?: string };
 
@@ -28,6 +29,10 @@ export async function syncNow(_prev: FormState, _formData: FormData): Promise<Fo
       };
     }
     const summary = await runImport(supabase, dataset);
+    await logAudit(supabase, 'sync', 'acumatica', null, {
+      inserted: summary.transactions.inserted,
+      as_of: summary.asOfDate,
+    });
     revalidatePath('/dashboard');
     revalidatePath('/admin');
     return {
@@ -70,6 +75,7 @@ export async function updateTargets(_prev: FormState, formData: FormData): Promi
   const supabase = await createClient();
   const { error } = await supabase.from('targets').update(parsed.data).eq('id', true);
   if (error) return { error: error.message };
+  await logAudit(supabase, 'update', 'targets', null, parsed.data);
   revalidatePath('/admin');
   revalidatePath('/dashboard');
   return { ok: true, message: 'Targets saved.' };
@@ -82,6 +88,7 @@ export async function updateUser(formData: FormData): Promise<void> {
   const is_active = formData.get('is_active') === 'on';
   const supabase = await createClient();
   await supabase.from('profiles').update({ role, is_active }).eq('id', id);
+  await logAudit(supabase, 'update', 'user', id, { role, is_active });
   revalidatePath('/admin');
 }
 
@@ -128,6 +135,10 @@ export async function inviteUser(_prev: FormState, formData: FormData): Promise<
     user_metadata: { full_name: parsed.data.full_name, role: parsed.data.role },
   });
   if (error) return { error: error.message };
+  await logAudit(await createClient(), 'create', 'user', null, {
+    email: parsed.data.email,
+    role: parsed.data.role,
+  });
 
   revalidatePath('/admin');
   return {

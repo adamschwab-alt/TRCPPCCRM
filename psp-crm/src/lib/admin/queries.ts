@@ -14,12 +14,17 @@ export async function getProfiles(): Promise<ProfileRow[]> {
   return data ?? [];
 }
 
-export async function getAuditLog(limit = 100): Promise<AuditLogRow[]> {
+export type AuditEntry = AuditLogRow & { actor_name: string | null };
+
+export async function getAuditLog(limit = 100): Promise<AuditEntry[]> {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from('audit_log')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  return data ?? [];
+  const [{ data }, { data: profiles }] = await Promise.all([
+    supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(limit),
+    supabase.from('profiles').select('id,full_name,email'),
+  ]);
+  const name = new Map((profiles ?? []).map((p) => [p.id, p.full_name || p.email]));
+  return (data ?? []).map((a) => ({
+    ...a,
+    actor_name: a.actor_id ? (name.get(a.actor_id) ?? null) : null,
+  }));
 }

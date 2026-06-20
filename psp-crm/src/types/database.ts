@@ -246,7 +246,12 @@ export interface Database {
       portfolio_kpis: ViewDef<PortfolioKpisRow>;
       whitespace_summary: ViewDef<WhitespaceSummaryRow>;
     };
-    Functions: Record<string, never>;
+    Functions: {
+      log_audit: {
+        Args: { p_action: string; p_entity: string; p_entity_id: string; p_diff?: unknown };
+        Returns: undefined;
+      };
+    };
     Enums: {
       user_role: UserRole;
       txn_status: TxnStatus;

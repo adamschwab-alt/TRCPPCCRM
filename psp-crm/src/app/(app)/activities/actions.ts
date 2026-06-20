@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { requireSession } from '@/lib/auth';
+import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string; ok?: boolean };
 
@@ -33,6 +34,7 @@ export async function logActivity(_prev: FormState, formData: FormData): Promise
     occurred_at: new Date().toISOString(),
   });
   if (error) return { error: error.message };
+  await logAudit(supabase, 'log', 'activity', parsed.data.account_id, { type: parsed.data.type });
   revalidatePath('/activities');
   return { ok: true };
 }
@@ -70,5 +72,6 @@ export async function setTaskStatus(id: string, status: 'open' | 'done'): Promis
   await requireSession();
   const supabase = await createClient();
   await supabase.from('tasks').update({ status }).eq('id', id);
+  await logAudit(supabase, status === 'done' ? 'complete' : 'reopen', 'task', id);
   revalidatePath('/activities');
 }
