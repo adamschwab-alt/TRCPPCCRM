@@ -58,6 +58,9 @@ export function OrderHistoryTable({ rows }: { rows: SalesTransactionRow[] }) {
     },
   ];
 
+  const onMobile = new Set(['date', 'item', 'net']);
+  for (const c of columns) c.hideOnMobile = !onMobile.has(c.key);
+
   return (
     <DataTable
       rows={rows}
@@ -65,7 +68,6 @@ export function OrderHistoryTable({ rows }: { rows: SalesTransactionRow[] }) {
       initialSortKey="date"
       initialDir="desc"
       searchPlaceholder="Filter orders by item, invoice, line…"
-      minWidth={760}
       rowKey={(t) => t.id}
     />
   );

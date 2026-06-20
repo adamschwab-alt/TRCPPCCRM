@@ -83,6 +83,9 @@ export function PipelineTable({ rows }: { rows: EnrichedOpportunity[] }) {
     },
   ];
 
+  const onMobile = new Set(['account', 'stage', 'amount']);
+  for (const c of columns) c.hideOnMobile = !onMobile.has(c.key);
+
   return (
     <DataTable
       rows={rows}
@@ -90,7 +93,6 @@ export function PipelineTable({ rows }: { rows: EnrichedOpportunity[] }) {
       initialSortKey="close"
       initialDir="asc"
       searchPlaceholder="Filter opportunities…"
-      minWidth={860}
       rowKey={(o) => o.id}
     />
   );

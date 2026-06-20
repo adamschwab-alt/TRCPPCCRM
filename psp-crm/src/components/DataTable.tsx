@@ -10,12 +10,15 @@ export type Column<T> = {
   sort?: (row: T) => string | number | null;
   /** Text included in the search filter. */
   filter?: (row: T) => string;
+  /** Hide this column on phones (shown from `sm` up) to keep tables readable. */
+  hideOnMobile?: boolean;
   cell: (row: T) => ReactNode;
 };
 
 /**
  * Reusable client table with a text filter + clickable column sorting.
- * Operates on already-loaded rows (client-side), so it's instant.
+ * Operates on already-loaded rows (client-side), so it's instant. Columns
+ * flagged `hideOnMobile` collapse on phones so the table fits the screen.
  */
 export function DataTable<T>({
   rows,
@@ -23,7 +26,6 @@ export function DataTable<T>({
   initialSortKey,
   initialDir = 'asc',
   searchPlaceholder = 'Filter…',
-  minWidth = 720,
   rowKey,
 }: {
   rows: T[];
@@ -31,7 +33,6 @@ export function DataTable<T>({
   initialSortKey?: string;
   initialDir?: 'asc' | 'desc';
   searchPlaceholder?: string;
-  minWidth?: number;
   rowKey?: (row: T, i: number) => string;
 }) {
   const [q, setQ] = useState('');
@@ -88,16 +89,16 @@ export function DataTable<T>({
         </span>
       </div>
       <div className="border-line bg-surface overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm" style={{ minWidth }}>
+        <table className="w-full text-sm">
           <thead>
             <tr className="border-line text-muted border-b text-left text-xs uppercase">
               {columns.map((c) => (
                 <th
                   key={c.key}
                   onClick={() => toggleSort(c.key)}
-                  className={`px-3 py-2.5 ${c.align === 'right' ? 'text-right' : ''} ${
-                    c.sort ? 'hover:text-charcoal cursor-pointer select-none' : ''
-                  }`}
+                  className={`px-3 py-2.5 whitespace-nowrap ${c.align === 'right' ? 'text-right' : ''} ${
+                    c.hideOnMobile ? 'hidden sm:table-cell' : ''
+                  } ${c.sort ? 'hover:text-charcoal cursor-pointer select-none' : ''}`}
                 >
                   {c.header}
                   {sortKey === c.key ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
@@ -114,7 +115,9 @@ export function DataTable<T>({
                 {columns.map((c) => (
                   <td
                     key={c.key}
-                    className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : ''}`}
+                    className={`px-3 py-2 whitespace-nowrap ${c.align === 'right' ? 'text-right' : ''} ${
+                      c.hideOnMobile ? 'hidden sm:table-cell' : ''
+                    }`}
                   >
                     {c.cell(r)}
                   </td>

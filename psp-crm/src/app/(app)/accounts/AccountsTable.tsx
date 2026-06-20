@@ -97,6 +97,9 @@ export function AccountsTable({
     },
   ];
 
+  const onMobile = new Set(['account', 'ttm', 'delta', 'status']);
+  for (const c of columns) c.hideOnMobile = !onMobile.has(c.key);
+
   return (
     <DataTable
       rows={rows}
@@ -104,7 +107,6 @@ export function AccountsTable({
       initialSortKey={initialSortKey}
       initialDir={initialDir}
       searchPlaceholder="Filter accounts, owner, status…"
-      minWidth={820}
       rowKey={(a) => a.account_id}
     />
   );
