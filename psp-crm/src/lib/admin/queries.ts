@@ -14,6 +14,25 @@ export async function getProfiles(): Promise<ProfileRow[]> {
   return data ?? [];
 }
 
+export type LastSync = { created_at: string; inserted: number | null } | null;
+
+export async function getLastSync(): Promise<LastSync> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from('audit_log')
+    .select('created_at,diff')
+    .eq('action', 'sync')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  const diff = (data.diff ?? {}) as { inserted?: number };
+  return {
+    created_at: data.created_at,
+    inserted: typeof diff.inserted === 'number' ? diff.inserted : null,
+  };
+}
+
 export type AuditEntry = AuditLogRow & { actor_name: string | null };
 
 export async function getAuditLog(limit = 100): Promise<AuditEntry[]> {

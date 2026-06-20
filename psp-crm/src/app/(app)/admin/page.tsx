@@ -1,6 +1,6 @@
 import { Card, SectionTitle } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
-import { getProfiles, getTargets, getAuditLog } from '@/lib/admin/queries';
+import { getProfiles, getTargets, getAuditLog, getLastSync } from '@/lib/admin/queries';
 import { updateUser } from './actions';
 import { TargetsForm, InviteForm, SyncForm } from './AdminForms';
 import { fmtDate } from '@/lib/format';
@@ -9,10 +9,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function AdminPage() {
   const { userId } = await requireRole('admin');
-  const [targets, profiles, audit] = await Promise.all([
+  const [targets, profiles, audit, lastSync] = await Promise.all([
     getTargets(),
     getProfiles(),
     getAuditLog(100),
+    getLastSync(),
   ]);
 
   return (
@@ -33,6 +34,13 @@ export default async function AdminPage() {
 
       <Card className="p-4">
         <SectionTitle>Data sync (Acumatica OData)</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          {lastSync
+            ? `Last sync: ${new Date(lastSync.created_at).toLocaleString('en-US', { timeZone: 'UTC' })} UTC${
+                lastSync.inserted != null ? ` · +${lastSync.inserted} new rows` : ''
+              }`
+            : 'Never synced yet.'}
+        </p>
         <SyncForm />
       </Card>
 
