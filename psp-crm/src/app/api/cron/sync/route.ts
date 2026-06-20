@@ -4,7 +4,9 @@ import { runImport } from '@/lib/import/run-import';
 import { AcumaticaODataAdapter } from '@/lib/adapters/acumatica';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // seconds (Vercel Pro). Hobby caps lower.
+// No explicit maxDuration — setting one above the deployment plan's limit fails
+// the Vercel build. Use incremental syncs (ACUMATICA_ODATA_MODIFIED_FIELD) to
+// keep runs well within the default. On Pro you can add `export const maxDuration`.
 
 /**
  * Scheduled live sync. Triggered by Vercel Cron (see vercel.json). Secured by

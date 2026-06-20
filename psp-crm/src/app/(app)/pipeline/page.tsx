@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { Card, KpiTile, SectionTitle } from '@/components/ui';
 import { getOpportunities, getTargets, type EnrichedOpportunity } from '@/lib/pipeline/queries';
-import { fmtCurrencyShort, fmtDate, fmtPct } from '@/lib/format';
+import { fmtCurrencyShort, fmtPct } from '@/lib/format';
 import type { OppStage } from '@/types/database';
+import { PipelineTable } from './PipelineTable';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,57 +106,13 @@ export default async function PipelinePage() {
       {/* Table */}
       <section className="mt-6">
         <SectionTitle>All opportunities</SectionTitle>
-        <Card className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead>
-              <tr className="border-line text-muted border-b text-left text-xs uppercase">
-                <th className="px-4 py-2.5">Account</th>
-                <th className="px-4 py-2.5">Type</th>
-                <th className="px-4 py-2.5">Stage</th>
-                <th className="px-4 py-2.5 text-right">Amount</th>
-                <th className="px-4 py-2.5 text-right">Win %</th>
-                <th className="px-4 py-2.5 text-right">Weighted</th>
-                <th className="px-4 py-2.5">Close</th>
-                <th className="px-4 py-2.5">Next step</th>
-              </tr>
-            </thead>
-            <tbody>
-              {opps.map((o) => (
-                <tr key={o.id} className="border-line/60 hover:bg-canvas border-b last:border-0">
-                  <td className="px-4 py-2.5">
-                    <Link
-                      href={`/pipeline/${o.id}`}
-                      className="text-brand-700 font-medium hover:underline"
-                    >
-                      {o.account_name ?? '—'}
-                    </Link>
-                    {o.branch_name && <div className="text-muted text-xs">{o.branch_name}</div>}
-                  </td>
-                  <td className="text-muted px-4 py-2.5">{labelType(o.type)}</td>
-                  <td className="px-4 py-2.5">{o.stage}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {fmtCurrencyShort(o.amount)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {o.win_prob != null ? fmtPct(o.win_prob, 0) : '—'}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {fmtCurrencyShort(o.weighted_amount)}
-                  </td>
-                  <td className="text-muted px-4 py-2.5">{fmtDate(o.expected_close)}</td>
-                  <td className="text-muted px-4 py-2.5">{o.next_step ?? '—'}</td>
-                </tr>
-              ))}
-              {opps.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="text-muted px-4 py-8 text-center">
-                    No opportunities yet — click “New opportunity”.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </Card>
+        {opps.length === 0 ? (
+          <Card className="text-muted p-8 text-center text-sm">
+            No opportunities yet — click “New opportunity”.
+          </Card>
+        ) : (
+          <PipelineTable rows={opps} />
+        )}
       </section>
     </div>
   );
@@ -174,16 +131,4 @@ function OppCard({ o }: { o: EnrichedOpportunity }) {
       </div>
     </Link>
   );
-}
-
-function labelType(t: string | null) {
-  return t === 'new_branch_activation'
-    ? 'Branch activation'
-    : t === 'displacement'
-      ? 'Displacement'
-      : t === 'new_logo'
-        ? 'New logo'
-        : t === 'expansion'
-          ? 'Expansion'
-          : '—';
 }
