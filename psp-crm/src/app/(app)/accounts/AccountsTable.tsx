@@ -8,7 +8,15 @@ import type { AccountMetricsRow } from '@/types/database';
 
 export type AccountVM = AccountMetricsRow & { owner_name: string | null };
 
-export function AccountsTable({ rows }: { rows: AccountVM[] }) {
+export function AccountsTable({
+  rows,
+  initialSortKey = 'ttm',
+  initialDir = 'desc',
+}: {
+  rows: AccountVM[];
+  initialSortKey?: string;
+  initialDir?: 'asc' | 'desc';
+}) {
   const columns: Column<AccountVM>[] = [
     {
       key: 'account',
@@ -93,8 +101,8 @@ export function AccountsTable({ rows }: { rows: AccountVM[] }) {
     <DataTable
       rows={rows}
       columns={columns}
-      initialSortKey="ttm"
-      initialDir="desc"
+      initialSortKey={initialSortKey}
+      initialDir={initialDir}
       searchPlaceholder="Filter accounts, owner, status…"
       minWidth={820}
       rowKey={(a) => a.account_id}
