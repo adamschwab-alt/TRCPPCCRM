@@ -8,7 +8,7 @@ build/
 backend/prisma/migrations/dev.db*
 frontend/dist/
 backend/public/
-coverage/
+/coverage/
 .vscode/
 .idea/
 *.tsbuildinfo
