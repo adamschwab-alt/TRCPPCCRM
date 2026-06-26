@@ -41,6 +41,33 @@ export function fmtDate(iso: string | null | undefined): string {
   });
 }
 
+/** "Apr 2025" — month + year only. */
+export function fmtMonthYear(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso + (iso.length === 10 ? 'T00:00:00Z' : '')).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
+/** Coarse "2h ago" / "3d ago" / "just now" relative to now. */
+export function fmtRelative(iso: string | null | undefined): string {
+  if (!iso) return 'never';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'never';
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  return `${months}mo ago`;
+}
+
 const RAG_CLASS: Record<CoverageRag, string> = {
   'On-track': 'bg-[var(--color-ontrack-bg)] text-[var(--color-ontrack)]',
   Watch: 'bg-[var(--color-watch-bg)] text-[var(--color-watch)]',

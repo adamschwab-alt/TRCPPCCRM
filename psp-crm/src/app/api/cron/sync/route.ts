@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { runImport } from '@/lib/import/run-import';
-import { AcumaticaODataAdapter } from '@/lib/adapters/acumatica';
+import { performSync } from '@/lib/sync/run-sync';
 
 export const dynamic = 'force-dynamic';
 // No explicit maxDuration — setting one above the deployment plan's limit fails
@@ -22,10 +21,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const dataset = await new AcumaticaODataAdapter().load();
     const supabase = createAdminClient();
-    const summary = await runImport(supabase, dataset);
-    return NextResponse.json({ ok: true, summary });
+    const result = await performSync(supabase);
+    return NextResponse.json({ ok: true, result });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : 'sync failed' },

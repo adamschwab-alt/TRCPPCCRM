@@ -5,8 +5,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/auth';
-import { runImport } from '@/lib/import/run-import';
-import { AcumaticaODataAdapter } from '@/lib/adapters/acumatica';
+import { performSync } from '@/lib/sync/run-sync';
 import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string; ok?: boolean; message?: string };
@@ -21,24 +20,11 @@ export async function syncNow(_prev: FormState, _formData: FormData): Promise<Fo
   await requireRole('admin');
   const supabase = await createClient();
   try {
-    const dataset = await new AcumaticaODataAdapter().load();
-    if (dataset.transactions.length === 0) {
-      return {
-        ok: true,
-        message: 'Connected, but the feed returned 0 rows — check the inquiry/endpoint.',
-      };
-    }
-    const summary = await runImport(supabase, dataset);
-    await logAudit(supabase, 'sync', 'acumatica', null, {
-      inserted: summary.transactions.inserted,
-      as_of: summary.asOfDate,
-    });
+    const result = await performSync(supabase);
+    revalidatePath('/', 'layout');
     revalidatePath('/dashboard');
     revalidatePath('/admin');
-    return {
-      ok: true,
-      message: `Synced ${summary.transactions.total} rows: +${summary.transactions.inserted} new, ${summary.transactions.skippedDuplicates} already present. As-of ${summary.asOfDate}.`,
-    };
+    return { ok: true, message: result.message };
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Sync failed' };
   }

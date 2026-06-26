@@ -4,12 +4,15 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { Logo } from './Logo';
+import { DataRefresh } from './DataRefresh';
 import type { UserRole } from '@/types/database';
+import type { DataCoverage } from '@/lib/sync/coverage';
 
 type NavItem = { href: string; label: string; soon?: boolean };
 
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/my-day', label: 'My Day' },
   { href: '/accounts', label: 'Accounts' },
   { href: '/coverage', label: 'Coverage' },
   { href: '/worklists', label: 'Worklists' },
@@ -21,10 +24,12 @@ export function NavBar({
   fullName,
   email,
   role,
+  coverage,
 }: {
   fullName: string | null;
   email: string;
   role: UserRole;
+  coverage: DataCoverage;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -62,6 +67,7 @@ export function NavBar({
         </div>
 
         <div className="flex items-center gap-3">
+          <DataRefresh coverage={coverage} canRefresh={role === 'admin' || role === 'manager'} />
           <div className="hidden text-right sm:block">
             <div className="text-charcoal text-xs font-semibold">{fullName || email}</div>
             <div className="text-muted text-[10px] tracking-wide uppercase">{role}</div>
