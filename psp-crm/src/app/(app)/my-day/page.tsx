@@ -37,7 +37,16 @@ export default async function MyDayPage({
               : 'Your prioritized branches to work today — highest value at stake first.'}
           </p>
         </div>
-        {staff && <RepPicker reps={reps} current={repId} />}
+        <div className="flex items-center gap-2">
+          {staff && <RepPicker reps={reps} current={repId} />}
+          <a
+            href={`/export/my-day${staff && repId ? `?rep=${repId}` : ''}`}
+            className="btn-secondary"
+            data-tap
+          >
+            ⬇ Excel
+          </a>
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
