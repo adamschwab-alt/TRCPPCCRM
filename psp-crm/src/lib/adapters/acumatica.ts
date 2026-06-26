@@ -38,13 +38,15 @@ export class AcumaticaODataAdapter implements DataSourceAdapter {
     const { url, username, password, modifiedField } = this.config();
     const auth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
 
-    // Build the first page URL (add an incremental $filter when configured).
-    let next: string | null = url;
+    // Build the first page URL. Normalizing through URL() percent-encodes spaces
+    // in the inquiry name (e.g. "PSP - Sales Invoiced") and adds the optional
+    // incremental $filter. Also request JSON explicitly for Acumatica OData v3.
+    const u = new URL(url);
+    if (!u.searchParams.has('$format')) u.searchParams.set('$format', 'json');
     if (since && modifiedField) {
-      const u = new URL(url);
       u.searchParams.set('$filter', `${modifiedField} ge ${since}T00:00:00Z`);
-      next = u.toString();
     }
+    let next: string | null = u.toString();
 
     const records: Record<string, unknown>[] = [];
     let guard = 0;
