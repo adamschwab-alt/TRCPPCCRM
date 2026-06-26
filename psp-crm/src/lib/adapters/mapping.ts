@@ -61,7 +61,19 @@ export const HEADER_ALIASES: Record<string, string[]> = {
     'desc',
   ],
   item_class: ['itemclass2', 'itemclass', 'class', 'category', 'productclass'],
-  product_line: ['cat', 'productline', 'prodline', 'product', 'plgroup', 'familygroup'],
+  product_line: [
+    'cat',
+    'productline',
+    'prodline',
+    'product',
+    'plgroup',
+    'familygroup',
+    // Acumatica "PSP-Sales Profitability Analysis Detailed" carries the
+    // Aluminum/Steel signal in the GL account description, e.g.
+    // "Sales_Aluminum Products" / "Sales_Steel Products". This is checked last
+    // so the workbook's `cat` column still wins when present.
+    'description',
+  ],
   sales_person: ['salespers', 'salesperson', 'salesrep', 'salesman', 'accountmanager', 'rep'],
   state: ['state', 'shiptostate', 'st', 'province'],
   city: ['city', 'shiptocity'],
@@ -111,6 +123,12 @@ export function classifyProductLine(
   if (r === 'other') return 'Other' as const;
   if (raw && /^alum/i.test(raw.trim())) return 'Aluminum' as const;
   if (raw && /^steel/i.test(raw.trim())) return 'Steel' as const;
+  // GL-account-description style values like "Sales_Aluminum Products" embed the
+  // signal mid-string (the underscore defeats a \b word boundary), so fall back
+  // to a plain substring test on the raw product-line source before the
+  // item-class / inventory-description haystack.
+  if (raw && /alum/i.test(raw)) return 'Aluminum' as const;
+  if (raw && /steel/i.test(raw)) return 'Steel' as const;
   const hay = `${itemClass ?? ''} ${desc ?? ''}`.toLowerCase();
   if (/\balum|\baluminium|\baluminum/.test(hay)) return 'Aluminum' as const;
   if (/\bsteel/.test(hay)) return 'Steel' as const;
