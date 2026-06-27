@@ -27,6 +27,7 @@ export function DataTable<T>({
   initialDir = 'asc',
   searchPlaceholder = 'Filter…',
   rowKey,
+  compact = false,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -34,6 +35,8 @@ export function DataTable<T>({
   initialDir?: 'asc' | 'desc';
   searchPlaceholder?: string;
   rowKey?: (row: T, i: number) => string;
+  /** Tighten padding and let body cells wrap so many-column tables fit the screen. */
+  compact?: boolean;
 }) {
   const [q, setQ] = useState('');
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
@@ -89,14 +92,14 @@ export function DataTable<T>({
         </span>
       </div>
       <div className="border-line bg-surface overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className={`w-full ${compact ? 'text-xs' : 'text-sm'}`}>
           <thead>
             <tr className="border-line text-muted border-b text-left text-xs uppercase">
               {columns.map((c) => (
                 <th
                   key={c.key}
                   onClick={() => toggleSort(c.key)}
-                  className={`px-3 py-2.5 whitespace-nowrap ${c.align === 'right' ? 'text-right' : ''} ${
+                  className={`${compact ? 'px-2 py-2' : 'px-3 py-2.5'} whitespace-nowrap ${c.align === 'right' ? 'text-right' : ''} ${
                     c.hideOnMobile ? 'hidden sm:table-cell' : ''
                   } ${c.sort ? 'hover:text-charcoal cursor-pointer select-none' : ''}`}
                 >
@@ -115,7 +118,7 @@ export function DataTable<T>({
                 {columns.map((c) => (
                   <td
                     key={c.key}
-                    className={`px-3 py-2 whitespace-nowrap ${c.align === 'right' ? 'text-right' : ''} ${
+                    className={`${compact ? 'px-2 py-1.5 align-top' : 'px-3 py-2 whitespace-nowrap'} ${c.align === 'right' ? 'text-right' : ''} ${
                       c.hideOnMobile ? 'hidden sm:table-cell' : ''
                     }`}
                   >

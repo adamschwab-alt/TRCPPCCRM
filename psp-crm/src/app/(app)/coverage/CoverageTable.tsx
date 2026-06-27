@@ -130,6 +130,7 @@ export function CoverageTable({
       initialDir={initialDir}
       searchPlaceholder="Filter branches, accounts, status…"
       rowKey={(b) => b.branch_id}
+      compact
     />
   );
 }

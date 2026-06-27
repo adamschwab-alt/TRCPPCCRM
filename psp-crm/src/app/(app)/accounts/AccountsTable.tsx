@@ -108,6 +108,7 @@ export function AccountsTable({
       initialDir={initialDir}
       searchPlaceholder="Filter accounts, owner, status…"
       rowKey={(a) => a.account_id}
+      compact
     />
   );
 }

@@ -94,6 +94,7 @@ export function PipelineTable({ rows }: { rows: EnrichedOpportunity[] }) {
       initialDir="asc"
       searchPlaceholder="Filter opportunities…"
       rowKey={(o) => o.id}
+      compact
     />
   );
 }
