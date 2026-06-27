@@ -55,27 +55,27 @@ export default async function AdminPage() {
       <Card className="p-4">
         <SectionTitle>Users ({profiles.length})</SectionTitle>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-line text-muted border-b text-left text-xs uppercase">
-                <th className="px-3 py-2">Name / email</th>
-                <th className="px-3 py-2">Role</th>
-                <th className="px-3 py-2">Active</th>
-                <th className="px-3 py-2"></th>
+                <th className="px-2 py-2">Name / email</th>
+                <th className="px-2 py-2">Role</th>
+                <th className="px-2 py-2">Active</th>
+                <th className="px-2 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {profiles.map((p) => (
                 <tr key={p.id} className="border-line/60 border-b last:border-0">
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-2">
                     <div className="text-charcoal font-medium">{p.full_name || '—'}</div>
                     <div className="text-muted text-xs">
                       {p.email}
                       {p.id === userId && ' (you)'}
                     </div>
                   </td>
-                  <td colSpan={3} className="px-3 py-2">
-                    <form action={updateUser} className="flex items-center gap-3">
+                  <td colSpan={3} className="px-2 py-2">
+                    <form action={updateUser} className="flex flex-wrap items-center gap-2">
                       <input type="hidden" name="id" value={p.id} />
                       <select
                         name="role"
@@ -110,22 +110,22 @@ export default async function AdminPage() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-line text-muted border-b text-left text-xs uppercase">
-                  <th className="px-3 py-2">When</th>
-                  <th className="px-3 py-2">Who</th>
-                  <th className="px-3 py-2">Action</th>
-                  <th className="px-3 py-2">Entity</th>
+                  <th className="px-2 py-2">When</th>
+                  <th className="px-2 py-2">Who</th>
+                  <th className="px-2 py-2">Action</th>
+                  <th className="px-2 py-2">Entity</th>
                 </tr>
               </thead>
               <tbody>
                 {audit.map((a) => (
                   <tr key={a.id} className="border-line/60 border-b last:border-0">
-                    <td className="text-muted px-3 py-2">{fmtDate(a.created_at.slice(0, 10))}</td>
-                    <td className="px-3 py-2">{a.actor_name ?? '—'}</td>
-                    <td className="px-3 py-2 capitalize">{a.action}</td>
-                    <td className="text-muted px-3 py-2">
+                    <td className="text-muted px-2 py-2">{fmtDate(a.created_at.slice(0, 10))}</td>
+                    <td className="px-2 py-2">{a.actor_name ?? '—'}</td>
+                    <td className="px-2 py-2 capitalize">{a.action}</td>
+                    <td className="text-muted px-2 py-2">
                       {a.entity ?? '—'} {a.entity_id ? a.entity_id.slice(0, 8) : ''}
                     </td>
                   </tr>
