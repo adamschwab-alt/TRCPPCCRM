@@ -3,9 +3,9 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { performSync } from '@/lib/sync/run-sync';
 
 export const dynamic = 'force-dynamic';
-// No explicit maxDuration — setting one above the deployment plan's limit fails
-// the Vercel build. Use incremental syncs (ACUMATICA_ODATA_MODIFIED_FIELD) to
-// keep runs well within the default. On Pro you can add `export const maxDuration`.
+// Full pulls upsert tens of thousands of rows; allow the Pro-plan ceiling (300s).
+// Must not exceed the deployment plan's limit or the Vercel build fails.
+export const maxDuration = 300;
 
 /**
  * Scheduled live sync. Triggered by Vercel Cron (see vercel.json). Secured by

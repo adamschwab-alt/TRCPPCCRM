@@ -119,7 +119,7 @@ export async function runImport(
     });
 
   let inserted = 0;
-  for (const batch of chunk(toInsert, 500)) {
+  for (const batch of chunk(toInsert, 1000)) {
     const { error, count } = await supabase.from('sales_transactions').insert(
       batch.map(({ t, accountId, branchId }) => ({
         date: t.date,

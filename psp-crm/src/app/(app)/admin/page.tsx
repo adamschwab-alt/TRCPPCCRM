@@ -6,6 +6,9 @@ import { TargetsForm, InviteForm, SyncForm } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+// A full reload upserts tens of thousands of rows; give the "Sync now" server
+// action room to finish (Pro plan ceiling is 300s).
+export const maxDuration = 300;
 
 export default async function AdminPage() {
   const { userId } = await requireRole('admin');
