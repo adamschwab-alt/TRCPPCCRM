@@ -1,10 +1,11 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { refreshData, type RefreshState } from '@/app/(app)/data-actions';
 import type { DataCoverage } from '@/lib/sync/coverage';
 import { fmtMonthYear, fmtDate, fmtRelative } from '@/lib/format';
+
+type RefreshState = { ok?: boolean; error?: string; message?: string };
 
 /**
  * Top-bar data-freshness pill. Shows the analytic cutoff at a glance; clicking
@@ -22,12 +23,27 @@ export function DataRefresh({
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const ref = useRef<HTMLDivElement>(null);
-  const [state, action, pending] = useActionState<RefreshState, FormData>(refreshData, {});
+  const [pending, setPending] = useState(false);
+  const [state, setState] = useState<RefreshState>({});
 
-  // Pull fresh numbers into view once a sync reports success.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state.ok, router]);
+  async function runRefresh() {
+    setPending(true);
+    setState({});
+    try {
+      const res = await fetch('/api/sync', { method: 'POST' });
+      const json: RefreshState = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        setState({ error: json.error ?? `Refresh failed (${res.status})` });
+      } else {
+        setState({ ok: true, message: json.message });
+        router.refresh(); // pull the new freshness numbers into view
+      }
+    } catch {
+      setState({ error: 'Network error — please try again.' });
+    } finally {
+      setPending(false);
+    }
+  }
 
   // Close the panel on outside click.
   useEffect(() => {
@@ -95,7 +111,7 @@ export function DataRefresh({
           </dl>
 
           {canRefresh ? (
-            <form action={action} className="mt-3">
+            <div className="mt-3">
               {state.error && (
                 <p className="mb-2 text-xs text-[var(--color-atrisk)]">{state.error}</p>
               )}
@@ -104,13 +120,19 @@ export function DataRefresh({
                   {state.message}
                 </p>
               )}
-              <button type="submit" disabled={pending} className="btn-primary w-full" data-tap>
-                {pending ? 'Refreshing…' : 'Refresh now'}
+              <button
+                type="button"
+                onClick={runRefresh}
+                disabled={pending}
+                className="btn-primary w-full"
+                data-tap
+              >
+                {pending ? 'Refreshing… (up to a few min)' : 'Refresh now'}
               </button>
               <p className="text-muted mt-1.5 text-[10px]">
                 Pulls the latest from Acumatica. Safe anytime — only adds new rows.
               </p>
-            </form>
+            </div>
           ) : (
             <p className="text-muted mt-3 text-[10px]">
               Data refresh is managed by your admin.
