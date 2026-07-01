@@ -2,7 +2,14 @@ import { Card, SectionTitle } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { getProfiles, getTargets, getAuditLog, getLastSync } from '@/lib/admin/queries';
 import { updateUser } from './actions';
-import { TargetsForm, InviteForm, SyncForm, RebuildForm, DedupeForm } from './AdminForms';
+import {
+  TargetsForm,
+  InviteForm,
+  SyncForm,
+  RebuildForm,
+  DedupeForm,
+  RestoreForm,
+} from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -50,6 +57,12 @@ export default async function AdminPage() {
             Fix doubled figures — remove duplicates
           </h3>
           <DedupeForm />
+        </div>
+        <div className="border-line mt-4 border-t pt-4">
+          <h3 className="text-charcoal mb-1 text-sm font-semibold">
+            Restore sales data from workbook
+          </h3>
+          <RestoreForm />
         </div>
         <details className="border-line mt-4 border-t pt-4">
           <summary className="text-charcoal cursor-pointer text-sm font-semibold">

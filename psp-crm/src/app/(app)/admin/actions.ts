@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/auth';
 import { performSync, performRebuild, deleteSalesByIds } from '@/lib/sync/run-sync';
+import { runImport } from '@/lib/import/run-import';
 import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string; ok?: boolean; message?: string };
@@ -50,6 +51,61 @@ export async function rebuildData(_prev: FormState, _formData: FormData): Promis
       : { ok: true, message: result.message };
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Rebuild failed' };
+  }
+}
+
+/**
+ * Recovery path that does NOT touch Acumatica: restore the sales table from the
+ * uploaded PSP workbook (.xlsx). Parses the file, clears the sales table, and
+ * loads the workbook's rows. Use this if the sales data was emptied and the live
+ * feed is unavailable. Accounts, owners, pipeline, and activities are untouched.
+ */
+export async function restoreFromWorkbook(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  await requireRole('admin');
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: 'Choose the PSP workbook (.xlsx) file to upload first.' };
+  }
+  const supabase = await createClient();
+  try {
+    const { FileImportAdapter } = await import('@/lib/adapters/file-import');
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const dataset = await new FileImportAdapter({ buffer }).load();
+    if (dataset.transactions.length < 1000) {
+      return {
+        error: `That file only produced ${dataset.transactions.length} rows — is it the right workbook (the "Data" tab)? Nothing was changed.`,
+      };
+    }
+
+    // Clear whatever is currently there (likely empty/partial), then load clean.
+    for (;;) {
+      const { data: ids, error } = await supabase
+        .from('sales_transactions')
+        .select('id')
+        .limit(2000);
+      if (error) throw new Error(error.message);
+      if (!ids || ids.length === 0) break;
+      await deleteSalesByIds(
+        supabase,
+        ids.map((r) => r.id),
+      );
+    }
+
+    const summary = await runImport(supabase, dataset);
+    await logAudit(supabase, 'restore', 'sales_transactions', null, {
+      loaded: summary.transactions.inserted,
+      as_of: summary.asOfDate,
+    });
+    revalidateData();
+    return {
+      ok: true,
+      message: `Restored ${summary.transactions.inserted} sales rows from the workbook. Data current through ${summary.asOfDate}. Reload the dashboard.`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Restore failed' };
   }
 }
 

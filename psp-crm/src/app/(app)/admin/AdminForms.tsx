@@ -1,7 +1,15 @@
 'use client';
 
 import { useActionState } from 'react';
-import { updateTargets, inviteUser, syncNow, rebuildData, dedupeData, type FormState } from './actions';
+import {
+  updateTargets,
+  inviteUser,
+  syncNow,
+  rebuildData,
+  dedupeData,
+  restoreFromWorkbook,
+  type FormState,
+} from './actions';
 import type { TargetsRow } from '@/types/database';
 
 export function SyncForm() {
@@ -20,6 +28,38 @@ export function SyncForm() {
       )}
       <button type="submit" disabled={pending} className="btn-primary" data-tap>
         {pending ? 'Syncing…' : 'Sync now'}
+      </button>
+    </form>
+  );
+}
+
+export function RestoreForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(restoreFromWorkbook, {});
+  return (
+    <form action={action} className="space-y-3">
+      <p className="text-muted text-xs">
+        Recovery: reload the sales table from your PSP workbook (.xlsx) — the file you originally
+        uploaded. Use this if the sales data was emptied. No Acumatica needed. Accounts, owners,
+        pipeline, and activities are untouched.
+      </p>
+      <input
+        type="file"
+        name="file"
+        accept=".xlsx,.xls"
+        className="border-line block w-full rounded-md border p-2 text-sm"
+      />
+      {state.error && (
+        <p className="rounded-md bg-[var(--color-atrisk-bg)] p-2 text-sm text-[var(--color-atrisk)]">
+          {state.error}
+        </p>
+      )}
+      {state.ok && (
+        <p className="rounded-md bg-[var(--color-ontrack-bg)] p-2 text-sm text-[var(--color-ontrack)]">
+          {state.message}
+        </p>
+      )}
+      <button type="submit" disabled={pending} className="btn-primary" data-tap>
+        {pending ? 'Restoring… (up to a few min — don’t close)' : 'Restore from workbook'}
       </button>
     </form>
   );
