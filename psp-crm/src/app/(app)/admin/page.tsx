@@ -2,7 +2,7 @@ import { Card, SectionTitle } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { getProfiles, getTargets, getAuditLog, getLastSync } from '@/lib/admin/queries';
 import { updateUser } from './actions';
-import { TargetsForm, InviteForm, SyncForm, RebuildForm } from './AdminForms';
+import { TargetsForm, InviteForm, SyncForm, RebuildForm, DedupeForm } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -46,9 +46,19 @@ export default async function AdminPage() {
         </p>
         <SyncForm />
         <div className="border-line mt-4 border-t pt-4">
-          <h3 className="text-charcoal mb-1 text-sm font-semibold">Fix doubled figures — rebuild</h3>
-          <RebuildForm />
+          <h3 className="text-charcoal mb-1 text-sm font-semibold">
+            Fix doubled figures — remove duplicates
+          </h3>
+          <DedupeForm />
         </div>
+        <details className="border-line mt-4 border-t pt-4">
+          <summary className="text-charcoal cursor-pointer text-sm font-semibold">
+            Advanced: full rebuild from Acumatica
+          </summary>
+          <div className="mt-3">
+            <RebuildForm />
+          </div>
+        </details>
       </Card>
 
       <Card className="p-4">

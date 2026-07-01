@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { updateTargets, inviteUser, syncNow, rebuildData, type FormState } from './actions';
+import { updateTargets, inviteUser, syncNow, rebuildData, dedupeData, type FormState } from './actions';
 import type { TargetsRow } from '@/types/database';
 
 export function SyncForm() {
@@ -20,6 +20,33 @@ export function SyncForm() {
       )}
       <button type="submit" disabled={pending} className="btn-primary" data-tap>
         {pending ? 'Syncing…' : 'Sync now'}
+      </button>
+    </form>
+  );
+}
+
+export function DedupeForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(dedupeData, {});
+  return (
+    <form action={action} className="space-y-3">
+      <p className="text-muted text-xs">
+        Removes duplicate sales rows left by the original data load — the cause of the doubled
+        figures. Runs entirely in the database (no Acumatica call), so it&rsquo;s fast and
+        won&rsquo;t hang. Keeps one clean copy of every sale; accounts, owners, pipeline, and
+        activities are untouched.
+      </p>
+      {state.error && (
+        <p className="rounded-md bg-[var(--color-atrisk-bg)] p-2 text-sm text-[var(--color-atrisk)]">
+          {state.error}
+        </p>
+      )}
+      {state.ok && (
+        <p className="rounded-md bg-[var(--color-ontrack-bg)] p-2 text-sm text-[var(--color-ontrack)]">
+          {state.message}
+        </p>
+      )}
+      <button type="submit" disabled={pending} className="btn-primary" data-tap>
+        {pending ? 'Removing duplicates…' : 'Remove duplicate rows'}
       </button>
     </form>
   );

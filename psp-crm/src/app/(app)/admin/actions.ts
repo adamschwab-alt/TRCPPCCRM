@@ -34,6 +34,7 @@ export async function syncNow(_prev: FormState, _formData: FormData): Promise<Fo
  * Fix duplicated sales data: re-pull the full Acumatica feed and REPLACE the
  * sales table with that single clean copy. Safe (pull-first-then-replace) and
  * admin-only. This is what a plain sync can't do — sync only adds rows.
+ * NOTE: this touches Acumatica, so it only works once the live feed is reachable.
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function rebuildData(_prev: FormState, _formData: FormData): Promise<FormState> {
@@ -50,6 +51,117 @@ export async function rebuildData(_prev: FormState, _formData: FormData): Promis
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Rebuild failed' };
   }
+}
+
+function revalidateData() {
+  revalidatePath('/', 'layout');
+  revalidatePath('/dashboard');
+  revalidatePath('/admin');
+}
+
+// Keep ONE row per economic sale. The duplicate copies (original seed vs later
+// load) share invoice #, SO #, date, amount and item description, but differ on
+// line number / branch / margin — so we partition on the shared fields only and
+// keep the newest row per group. Text fields are trimmed/lowered so trivial
+// formatting differences don't hide a duplicate.
+const DEDUPE_SQL = `
+with d as (
+  select id, row_number() over (
+    partition by
+      btrim(coalesce(invoice_nbr,'')),
+      btrim(coalesce(so_nbr,'')),
+      date,
+      net_sale,
+      lower(btrim(coalesce(inventory_description,'')))
+    order by created_at desc, ctid desc
+  ) as rn
+  from sales_transactions
+)
+delete from sales_transactions s using d where s.id = d.id and d.rn > 1
+`;
+
+/**
+ * Remove duplicate sales rows entirely inside the database — no Acumatica call,
+ * so it can't hang on the feed. Uses the direct Postgres connection (one fast
+ * statement) when DATABASE_URL is set; otherwise falls back to an API-based pass.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function dedupeData(_prev: FormState, _formData: FormData): Promise<FormState> {
+  await requireRole('admin');
+  try {
+    const url = process.env.DATABASE_URL;
+    if (url) {
+      const { Client } = await import('pg');
+      const client = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+      await client.connect();
+      try {
+        const before = await client.query('select count(*)::int as n from sales_transactions');
+        const del = await client.query(DEDUPE_SQL);
+        const after = await client.query('select count(*)::int as n from sales_transactions');
+        revalidateData();
+        return {
+          ok: true,
+          message: `Removed ${del.rowCount ?? 0} duplicate rows (${before.rows[0].n} → ${after.rows[0].n}). Reload the dashboard to see the corrected figures.`,
+        };
+      } finally {
+        await client.end().catch(() => {});
+      }
+    }
+
+    // Fallback: no direct connection configured — dedupe via the API.
+    const removed = await dedupeViaApi();
+    revalidateData();
+    return {
+      ok: true,
+      message: `Removed ${removed} duplicate rows. Reload the dashboard to see the corrected figures.`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Dedupe failed' };
+  }
+}
+
+type DedupeRow = {
+  id: string;
+  invoice_nbr: string | null;
+  so_nbr: string | null;
+  date: string;
+  net_sale: number;
+  inventory_description: string | null;
+};
+
+async function dedupeViaApi(): Promise<number> {
+  const supabase = await createClient();
+  const rows: DedupeRow[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('sales_transactions')
+      .select('id,invoice_nbr,so_nbr,date,net_sale,inventory_description')
+      .order('created_at', { ascending: false }) // newest first → first seen is the keeper
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...(data as DedupeRow[]));
+    if (data.length < pageSize) break;
+  }
+
+  const key = (r: DedupeRow) =>
+    `${(r.invoice_nbr ?? '').trim()}|${(r.so_nbr ?? '').trim()}|${r.date}|${r.net_sale}|${(r.inventory_description ?? '').trim().toLowerCase()}`;
+
+  const seen = new Set<string>();
+  const dupeIds: string[] = [];
+  for (const r of rows) {
+    const k = key(r);
+    if (seen.has(k)) dupeIds.push(r.id);
+    else seen.add(k);
+  }
+
+  for (let i = 0; i < dupeIds.length; i += 1000) {
+    const batch = dupeIds.slice(i, i + 1000);
+    const { error } = await supabase.from('sales_transactions').delete().in('id', batch);
+    if (error) throw error;
+  }
+  return dupeIds.length;
 }
 
 const num = (v: unknown) => z.coerce.number().parse(v);
