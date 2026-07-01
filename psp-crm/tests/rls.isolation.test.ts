@@ -42,6 +42,9 @@ beforeAll(async () => {
       ('2025-06-01', 100, 30, 'Closed','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000b1','Steel','I1','1'),
       ('2025-06-01', 200, 60, 'Closed','00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000b2','Steel','I2','1');
   `);
+  // Pin as_of so the TTM window is deterministic (the seed defaults it to last
+  // month via now(), which would age these fixed-date rows out over time).
+  await db.exec(`update app_settings set as_of_date = '2025-06-30';`);
 });
 
 afterAll(async () => {

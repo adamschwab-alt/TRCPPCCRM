@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -270,16 +271,6 @@ const inviteSchema = z.object({
   role: z.enum(['admin', 'manager', 'rep']),
 });
 
-function tempPassword() {
-  // readable-ish strong temp password
-  return (
-    'PSP-' +
-    Math.random().toString(36).slice(2, 8) +
-    Math.random().toString(36).slice(2, 6).toUpperCase() +
-    '!9'
-  );
-}
-
 export async function inviteUser(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireRole('admin');
   const parsed = inviteSchema.safeParse({
@@ -295,19 +286,30 @@ export async function inviteUser(_prev: FormState, formData: FormData): Promise<
   } catch {
     return {
       error:
-        'Service role key not configured — create the user from the Supabase dashboard instead (Authentication → Users).',
+        'Email invites need the service role key. Set SUPABASE_SERVICE_ROLE_KEY in Vercel, or add the user in Supabase → Authentication → Users.',
     };
   }
 
-  const password = tempPassword();
-  const { error } = await admin.auth.admin.createUser({
-    email: parsed.data.email,
-    password,
-    email_confirm: true,
-    user_metadata: { full_name: parsed.data.full_name, role: parsed.data.role },
+  // Absolute URL the invite link returns to (must be allow-listed in Supabase →
+  // Authentication → URL Configuration → Redirect URLs).
+  const origin =
+    (await headers()).get('origin') ?? process.env.NEXT_PUBLIC_SITE_URL ?? '';
+  const redirectTo = `${origin}/auth/confirm?next=/auth/set-password`;
+
+  const { error } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, {
+    data: { full_name: parsed.data.full_name, role: parsed.data.role },
+    redirectTo,
   });
-  if (error) return { error: error.message };
-  await logAudit(await createClient(), 'create', 'user', null, {
+  if (error) {
+    const already = /already|registered|exists/i.test(error.message);
+    return {
+      error: already
+        ? `${parsed.data.email} already has an account. Delete it in Supabase → Authentication → Users, then invite again — or have them use "forgot password".`
+        : `Could not send the invite: ${error.message}. Check that email sending (SMTP) is configured in Supabase → Authentication.`,
+    };
+  }
+
+  await logAudit(await createClient(), 'invite', 'user', null, {
     email: parsed.data.email,
     role: parsed.data.role,
   });
@@ -315,6 +317,6 @@ export async function inviteUser(_prev: FormState, formData: FormData): Promise<
   revalidatePath('/admin');
   return {
     ok: true,
-    message: `User created. Temporary password: ${password} — share it securely; they'll set up 2FA on first login.`,
+    message: `Invitation emailed to ${parsed.data.email}. They'll click the link, set a password, and enroll 2FA. If it doesn't arrive in a few minutes, check spam — or confirm SMTP is set up in Supabase.`,
   };
 }
