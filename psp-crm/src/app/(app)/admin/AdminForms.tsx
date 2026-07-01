@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { updateTargets, inviteUser, syncNow, type FormState } from './actions';
+import { updateTargets, inviteUser, syncNow, rebuildData, type FormState } from './actions';
 import type { TargetsRow } from '@/types/database';
 
 export function SyncForm() {
@@ -20,6 +20,38 @@ export function SyncForm() {
       )}
       <button type="submit" disabled={pending} className="btn-primary" data-tap>
         {pending ? 'Syncing…' : 'Sync now'}
+      </button>
+    </form>
+  );
+}
+
+export function RebuildForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(rebuildData, {});
+  return (
+    <form action={action} className="space-y-3">
+      <p className="text-muted text-xs">
+        Fixes doubled sales figures. Re-pulls the <strong>entire</strong> Acumatica feed, then
+        replaces the sales table with that single clean copy — so duplicate rows from the original
+        data load are removed. Your accounts, owners, pipeline, and activities are{' '}
+        <strong>not</strong> affected. Safe: nothing is deleted until the full pull succeeds.
+      </p>
+      {state.error && (
+        <p className="rounded-md bg-[var(--color-atrisk-bg)] p-2 text-sm text-[var(--color-atrisk)]">
+          {state.error}
+        </p>
+      )}
+      {state.ok && (
+        <p className="rounded-md bg-[var(--color-ontrack-bg)] p-2 text-sm text-[var(--color-ontrack)]">
+          {state.message}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={pending}
+        className="border-line text-charcoal-2 hover:bg-canvas rounded-md border px-4 py-2 text-sm font-semibold"
+        data-tap
+      >
+        {pending ? 'Rebuilding… (up to a few min — don’t close)' : 'Rebuild sales data from Acumatica'}
       </button>
     </form>
   );

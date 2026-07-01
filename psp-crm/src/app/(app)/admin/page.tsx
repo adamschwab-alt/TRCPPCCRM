@@ -2,7 +2,7 @@ import { Card, SectionTitle } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
 import { getProfiles, getTargets, getAuditLog, getLastSync } from '@/lib/admin/queries';
 import { updateUser } from './actions';
-import { TargetsForm, InviteForm, SyncForm } from './AdminForms';
+import { TargetsForm, InviteForm, SyncForm, RebuildForm } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +45,10 @@ export default async function AdminPage() {
             : 'Never synced yet.'}
         </p>
         <SyncForm />
+        <div className="border-line mt-4 border-t pt-4">
+          <h3 className="text-charcoal mb-1 text-sm font-semibold">Fix doubled figures — rebuild</h3>
+          <RebuildForm />
+        </div>
       </Card>
 
       <Card className="p-4">

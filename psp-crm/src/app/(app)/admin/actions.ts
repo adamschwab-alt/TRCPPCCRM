@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/auth';
-import { performSync } from '@/lib/sync/run-sync';
+import { performSync, performRebuild } from '@/lib/sync/run-sync';
 import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string; ok?: boolean; message?: string };
@@ -27,6 +27,28 @@ export async function syncNow(_prev: FormState, _formData: FormData): Promise<Fo
     return { ok: true, message: result.message };
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Sync failed' };
+  }
+}
+
+/**
+ * Fix duplicated sales data: re-pull the full Acumatica feed and REPLACE the
+ * sales table with that single clean copy. Safe (pull-first-then-replace) and
+ * admin-only. This is what a plain sync can't do — sync only adds rows.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function rebuildData(_prev: FormState, _formData: FormData): Promise<FormState> {
+  await requireRole('admin');
+  const supabase = await createClient();
+  try {
+    const result = await performRebuild(supabase);
+    revalidatePath('/', 'layout');
+    revalidatePath('/dashboard');
+    revalidatePath('/admin');
+    return result.empty
+      ? { error: result.message }
+      : { ok: true, message: result.message };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Rebuild failed' };
   }
 }
 

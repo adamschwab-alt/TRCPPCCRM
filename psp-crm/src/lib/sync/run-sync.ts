@@ -47,3 +47,61 @@ export async function performSync(
     message: `Synced ${summary.transactions.total} rows: +${summary.transactions.inserted} new, ${summary.transactions.skippedDuplicates} already present. Data is current through ${summary.asOfDate}.`,
   };
 }
+
+/**
+ * One-click clean rebuild — the cure for duplicated sales rows that a plain sync
+ * can't fix (sync only ADDS rows; it never removes the stale copies from an
+ * earlier seed).
+ *
+ * Order is deliberately pull-first-then-replace so it is SAFE: we only delete the
+ * existing sales after a full Acumatica pull has succeeded and passed a sanity
+ * floor. Accounts, branches, owners, pipeline, and activities are untouched —
+ * only sales_transactions is rebuilt, leaving exactly one clean copy of each sale.
+ */
+export async function performRebuild(supabase: SupabaseClient<Database>): Promise<SyncResult> {
+  // 1) Pull first. Nothing is deleted until we have a good dataset in hand.
+  const dataset = await new AcumaticaODataAdapter().load();
+  if (dataset.transactions.length < 5000) {
+    return {
+      ok: true,
+      empty: true,
+      message: `Aborted for safety: the Acumatica feed returned only ${dataset.transactions.length} rows (expected tens of thousands). Nothing was deleted — check the connection and try again.`,
+    };
+  }
+
+  // 2) Clear existing sales in batches (one giant DELETE can hit the API's
+  //    statement timeout; batching by id list stays well under it).
+  let deleted = 0;
+  for (;;) {
+    const { data: ids, error: selErr } = await supabase
+      .from('sales_transactions')
+      .select('id')
+      .limit(5000);
+    if (selErr) throw new Error(`Could not read existing sales to clear them: ${selErr.message}`);
+    if (!ids || ids.length === 0) break;
+    const { error: delErr } = await supabase
+      .from('sales_transactions')
+      .delete()
+      .in(
+        'id',
+        ids.map((r) => r.id),
+      );
+    if (delErr) throw new Error(`Could not clear existing sales: ${delErr.message}`);
+    deleted += ids.length;
+  }
+
+  // 3) Load the single clean copy.
+  const summary = await runImport(supabase, dataset);
+  await logAudit(supabase, 'rebuild', 'sales_transactions', null, {
+    removed: deleted,
+    loaded: summary.transactions.inserted,
+    as_of: summary.asOfDate,
+  });
+
+  return {
+    ok: true,
+    empty: false,
+    summary,
+    message: `Rebuilt from Acumatica: removed ${deleted} old rows, loaded ${summary.transactions.inserted} clean rows. Data is current through ${summary.asOfDate}.`,
+  };
+}
