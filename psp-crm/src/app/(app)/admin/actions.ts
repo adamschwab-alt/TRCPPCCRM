@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/auth';
-import { performSync, performRebuild } from '@/lib/sync/run-sync';
+import { performSync, performRebuild, deleteSalesByIds } from '@/lib/sync/run-sync';
 import { logAudit } from '@/lib/audit';
 
 export type FormState = { error?: string; ok?: boolean; message?: string };
@@ -156,11 +156,7 @@ async function dedupeViaApi(): Promise<number> {
     else seen.add(k);
   }
 
-  for (let i = 0; i < dupeIds.length; i += 1000) {
-    const batch = dupeIds.slice(i, i + 1000);
-    const { error } = await supabase.from('sales_transactions').delete().in('id', batch);
-    if (error) throw error;
-  }
+  await deleteSalesByIds(supabase, dupeIds);
   return dupeIds.length;
 }
 

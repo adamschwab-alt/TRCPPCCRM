@@ -12,6 +12,31 @@ export type SyncResult =
   | { ok: true; empty: false; message: string; summary: ImportSummary };
 
 /**
+ * Delete sales rows by id in URL-safe chunks. PostgREST puts the id list in the
+ * request URL, so a big `.in(...)` overflows it and returns 400 Bad Request.
+ * 100 ids per request keeps the URL small; a little concurrency keeps it quick.
+ */
+export async function deleteSalesByIds(
+  supabase: SupabaseClient<Database>,
+  ids: string[],
+): Promise<void> {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const CONCURRENCY = 6;
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const results = await Promise.all(
+      chunks.slice(i, i + CONCURRENCY).map((c) =>
+        supabase
+          .from('sales_transactions')
+          .delete()
+          .in('id', c),
+      ),
+    );
+    for (const r of results) if (r.error) throw new Error(r.error.message);
+  }
+}
+
+/**
  * Pull the latest sales from Acumatica and upsert them through the shared,
  * oracle-proven mapping. Idempotent — re-running only adds rows it hasn't seen.
  * The caller supplies the Supabase client so this works both with a user's
@@ -69,24 +94,20 @@ export async function performRebuild(supabase: SupabaseClient<Database>): Promis
     };
   }
 
-  // 2) Clear existing sales in batches (one giant DELETE can hit the API's
-  //    statement timeout; batching by id list stays well under it).
+  // 2) Clear existing sales. IDs go in the request URL, so they must be sent in
+  //    small chunks — thousands at once overflows the URL and returns 400.
   let deleted = 0;
   for (;;) {
     const { data: ids, error: selErr } = await supabase
       .from('sales_transactions')
       .select('id')
-      .limit(5000);
+      .limit(2000);
     if (selErr) throw new Error(`Could not read existing sales to clear them: ${selErr.message}`);
     if (!ids || ids.length === 0) break;
-    const { error: delErr } = await supabase
-      .from('sales_transactions')
-      .delete()
-      .in(
-        'id',
-        ids.map((r) => r.id),
-      );
-    if (delErr) throw new Error(`Could not clear existing sales: ${delErr.message}`);
+    await deleteSalesByIds(
+      supabase,
+      ids.map((r) => r.id),
+    );
     deleted += ids.length;
   }
 
