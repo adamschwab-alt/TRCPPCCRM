@@ -27,20 +27,20 @@ export default async function DashboardPage() {
     getAppSettings(),
   ]);
 
-  // Empty state — workbook not yet seeded.
+  // Empty state — either no data loaded yet (admin) or, for a rep, no accounts
+  // assigned to their book (RLS scopes everything to owned records).
   if (!kpis || kpis.prior_book === 0) {
     return (
       <div>
         <PageHeader role={profile.role} asOf={settings?.as_of_date} />
         <Card className="mt-6 p-8 text-center">
-          <p className="text-charcoal text-lg font-semibold">No coverage data yet</p>
+          <p className="text-charcoal text-lg font-semibold">
+            {profile.role === 'rep' ? 'No accounts assigned to you yet' : 'No coverage data yet'}
+          </p>
           <p className="text-muted mx-auto mt-2 max-w-md text-sm">
-            Import <code className="bg-canvas rounded px-1">PSP_Account_Coverage_Tracker.xlsx</code>{' '}
-            to populate the dashboard. Run{' '}
-            <code className="bg-canvas rounded px-1">
-              npm run db:seed -- ./data/PSP_Account_Coverage_Tracker.xlsx
-            </code>
-            .
+            {profile.role === 'rep'
+              ? 'You only see accounts and branches you own. Ask your admin to assign your book (Accounts → Edit → Owner), and it will appear here.'
+              : 'Load sales data from Admin → Data sync — run a sync from Acumatica or restore from the workbook upload.'}
           </p>
         </Card>
       </div>
