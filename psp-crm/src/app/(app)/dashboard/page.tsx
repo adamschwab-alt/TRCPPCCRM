@@ -70,6 +70,7 @@ export default async function DashboardPage() {
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
           label="Current book (TTM)"
+          href="/accounts"
           value={fmtCurrencyShort(kpis.current_book)}
           sub={
             <span>
@@ -88,6 +89,7 @@ export default async function DashboardPage() {
         />
         <KpiTile
           label="GRR"
+          href="/worklists?list=at-risk"
           flagship
           value={fmtPct(kpis.grr)}
           tone={tone(kpis.grr, grrTarget, 'gte')}
@@ -95,6 +97,7 @@ export default async function DashboardPage() {
         />
         <KpiTile
           label="NRR"
+          href="/accounts?filter=expanding"
           value={fmtPct(kpis.nrr)}
           tone={tone(kpis.nrr, nrrTarget, 'gte')}
           sub={`Target ${fmtPct(nrrTarget, 0)}`}
@@ -102,24 +105,28 @@ export default async function DashboardPage() {
         <KpiTile label="Gross margin" value={fmtPct(kpis.gm_pct)} sub="TTM blended" />
         <KpiTile
           label="Contraction"
+          href="/accounts?filter=contracting"
           value={fmtCurrencyShort(kpis.contraction)}
           tone={tone(kpis.contraction, ceiling, 'lte')}
           sub={`Ceiling ${fmtCurrencyShort(ceiling)}`}
         />
         <KpiTile
           label="Expansion"
+          href="/accounts?filter=expanding"
           value={fmtCurrencyShort(kpis.expansion)}
           tone="good"
           sub="Growth in retained"
         />
         <KpiTile
           label="New business"
+          href="/accounts?filter=new"
           value={fmtCurrencyShort(kpis.new_business)}
           tone={tone(kpis.new_business, newBizTarget, 'gte')}
           sub={`${kpis.new_accounts} new · target ${fmtCurrencyShort(newBizTarget)}`}
         />
         <KpiTile
           label="Past reorder cadence"
+          href="/worklists?list=cadence"
           value={String(pastCadence)}
           tone={pastCadence > 0 ? 'warn' : 'good'}
           sub={`Branches idle > ${targets?.cadence_days ?? 75}d`}
@@ -179,11 +186,13 @@ export default async function DashboardPage() {
           <ul className="space-y-3 text-sm">
             <WsRow
               label="Aluminum-only (no steel)"
+              href="/coverage?ws=steel-gap"
               count={steelGap?.branch_count}
               value={steelGap?.ttm_revenue}
             />
             <WsRow
               label="Steel-only (no aluminum)"
+              href="/coverage?ws=alu-gap"
               count={aluGap?.branch_count}
               value={aluGap?.ttm_revenue}
             />
@@ -198,14 +207,31 @@ export default async function DashboardPage() {
   );
 }
 
-function WsRow({ label, count, value }: { label: string; count?: number; value?: number }) {
+function WsRow({
+  label,
+  href,
+  count,
+  value,
+}: {
+  label: string;
+  href: string;
+  count?: number;
+  value?: number;
+}) {
   return (
-    <li className="bg-canvas flex items-center justify-between rounded-md px-3 py-2">
-      <span className="text-charcoal-2">{label}</span>
-      <span className="text-right">
-        <span className="text-charcoal font-bold tabular-nums">{count ?? 0}</span>
-        <span className="text-muted ml-2 text-xs">{fmtCurrencyShort(value ?? 0)}</span>
-      </span>
+    <li>
+      <Link
+        href={href}
+        data-tap
+        className="bg-canvas hover:bg-brand-50 group flex items-center justify-between rounded-md px-3 py-2 transition-colors"
+      >
+        <span className="text-charcoal-2 group-hover:text-brand-700">{label}</span>
+        <span className="text-right">
+          <span className="text-charcoal font-bold tabular-nums">{count ?? 0}</span>
+          <span className="text-muted ml-2 text-xs">{fmtCurrencyShort(value ?? 0)}</span>
+          <span className="text-muted group-hover:text-brand-700 ml-2 text-xs">›</span>
+        </span>
+      </Link>
     </li>
   );
 }
