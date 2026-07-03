@@ -90,9 +90,12 @@ export async function runImport(
   {
     const pageSize = 1000;
     for (let from = 0; ; from += pageSize) {
+      // Stable order is required for correct pagination — without it Postgres
+      // may return rows in a different order per page and keys get skipped.
       let q = supabase
         .from('sales_transactions')
         .select('invoice_nbr,so_nbr,line_nbr')
+        .order('id')
         .range(from, from + pageSize - 1);
       if (opts.sinceDate) q = q.gte('date', opts.sinceDate);
       const { data, error } = await q;
@@ -123,34 +126,51 @@ export async function runImport(
       return true;
     });
 
+  // Insert with conflict tolerance. The pre-scan catches most duplicates, but
+  // the dedupe key is a unique EXPRESSION index (PostgREST upsert can't target
+  // it), so a residual collision aborts its whole batch with 23505. Recover by
+  // bisecting the failed batch — conflicting single rows are counted as
+  // duplicates and skipped, everything else still lands.
+  type InsertRow = Database['public']['Tables']['sales_transactions']['Insert'];
+  async function insertTolerant(rows: InsertRow[]): Promise<{ ins: number; dup: number }> {
+    if (rows.length === 0) return { ins: 0, dup: 0 };
+    const { error } = await supabase.from('sales_transactions').insert(rows);
+    if (!error) return { ins: rows.length, dup: 0 };
+    const isConflict = error.code === '23505' || /duplicate key/i.test(error.message);
+    if (!isConflict) throw error;
+    if (rows.length === 1) return { ins: 0, dup: 1 };
+    const mid = rows.length >> 1;
+    const a = await insertTolerant(rows.slice(0, mid));
+    const b = await insertTolerant(rows.slice(mid));
+    return { ins: a.ins + b.ins, dup: a.dup + b.dup };
+  }
+
   let inserted = 0;
   for (const batch of chunk(toInsert, 1000)) {
-    const { error, count } = await supabase.from('sales_transactions').insert(
-      batch.map(({ t, accountId, branchId }) => ({
-        date: t.date,
-        net_sale: t.net_sale,
-        quantity: t.quantity,
-        cost: t.cost,
-        margin: t.margin,
-        status: t.status,
-        so_type: t.so_type,
-        account_id: accountId,
-        branch_id: branchId,
-        inventory_id: t.inventory_id,
-        inventory_description: t.inventory_description,
-        item_class: t.item_class,
-        product_line: t.product_line,
-        sales_person: t.sales_person,
-        state: t.state,
-        city: t.city,
-        invoice_nbr: t.invoice_nbr,
-        so_nbr: t.so_nbr,
-        line_nbr: t.line_nbr,
-      })),
-      { count: 'exact' },
-    );
-    if (error) throw error;
-    inserted += count ?? batch.length;
+    const rows: InsertRow[] = batch.map(({ t, accountId, branchId }) => ({
+      date: t.date,
+      net_sale: t.net_sale,
+      quantity: t.quantity,
+      cost: t.cost,
+      margin: t.margin,
+      status: t.status,
+      so_type: t.so_type,
+      account_id: accountId,
+      branch_id: branchId,
+      inventory_id: t.inventory_id,
+      inventory_description: t.inventory_description,
+      item_class: t.item_class,
+      product_line: t.product_line,
+      sales_person: t.sales_person,
+      state: t.state,
+      city: t.city,
+      invoice_nbr: t.invoice_nbr,
+      so_nbr: t.so_nbr,
+      line_nbr: t.line_nbr,
+    }));
+    const r = await insertTolerant(rows);
+    inserted += r.ins;
+    skippedDuplicates += r.dup;
   }
 
   // ── as_of_date = latest complete month-end across booked transactions ──────
