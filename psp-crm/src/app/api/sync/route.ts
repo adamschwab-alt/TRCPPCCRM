@@ -39,9 +39,13 @@ export async function POST() {
     revalidatePath('/', 'layout');
     return NextResponse.json({ ok: true, message: result.message });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : 'Refresh failed' },
-      { status: 500 },
-    );
+    console.error('[api/sync] refresh failed:', e);
+    // DOMExceptions (e.g. fetch timeouts) are not `instanceof Error` in Node —
+    // extract a message from whatever shape arrived so the UI shows the cause.
+    const msg =
+      e instanceof Error
+        ? e.message
+        : ((e as { message?: string } | null)?.message ?? String(e));
+    return NextResponse.json({ ok: false, error: msg || 'Refresh failed' }, { status: 500 });
   }
 }

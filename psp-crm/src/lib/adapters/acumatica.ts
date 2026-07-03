@@ -67,16 +67,32 @@ export class AcumaticaODataAdapter implements DataSourceAdapter {
           headers: { Authorization: auth, Accept: 'application/json' },
           cache: 'no-store',
           // Fail fast with a clear error instead of hanging the whole request
-          // when the feed stalls.
-          signal: AbortSignal.timeout(60_000),
+          // when the feed stalls. The first page gets extra room — a filtered
+          // GI query can take Acumatica a while to compute server-side.
+          signal: AbortSignal.timeout(firstPage ? 120_000 : 60_000),
         });
       } catch (e) {
-        if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        // NB: AbortSignal.timeout throws a DOMException, which is NOT
+        // `instanceof Error` in Node — detect by name, and unwrap fetch's
+        // wrapped `cause`, so the caller gets a real message instead of a
+        // generic failure.
+        const name = (e as { name?: string } | null)?.name;
+        const causeName = (e as { cause?: { name?: string } } | null)?.cause?.name;
+        if (
+          name === 'TimeoutError' ||
+          name === 'AbortError' ||
+          causeName === 'TimeoutError' ||
+          causeName === 'AbortError'
+        ) {
           throw new Error(
-            'Acumatica did not respond within 60 seconds — the feed may be slow or down. Try again shortly.',
+            'Acumatica did not respond in time — the feed may be slow or down. Try again in a few minutes.',
           );
         }
-        throw e;
+        if (e instanceof Error) {
+          const causeMsg = (e as { cause?: { message?: string } }).cause?.message;
+          throw new Error(`Acumatica request failed: ${e.message}${causeMsg ? ` (${causeMsg})` : ''}`);
+        }
+        throw new Error(`Acumatica request failed: ${String(e)}`);
       }
       if (!res.ok) {
         // If the first filtered page fails for ANY reason, retry: first with
