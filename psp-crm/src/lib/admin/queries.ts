@@ -25,12 +25,21 @@ export async function getLastSync(): Promise<LastSync> {
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!data) return null;
-  const diff = (data.diff ?? {}) as { inserted?: number };
-  return {
-    created_at: data.created_at,
-    inserted: typeof diff.inserted === 'number' ? diff.inserted : null,
-  };
+  if (data) {
+    const diff = (data.diff ?? {}) as { inserted?: number };
+    return {
+      created_at: data.created_at,
+      inserted: typeof diff.inserted === 'number' ? diff.inserted : null,
+    };
+  }
+  // Fall back to the app_settings stamp (set on every sync/restore) when the
+  // audit log has no entries — e.g. the log_audit function isn't installed.
+  const { data: settings } = await supabase
+    .from('app_settings')
+    .select('updated_at')
+    .eq('id', true)
+    .maybeSingle();
+  return settings ? { created_at: settings.updated_at, inserted: null } : null;
 }
 
 export type AuditEntry = AuditLogRow & { actor_name: string | null };

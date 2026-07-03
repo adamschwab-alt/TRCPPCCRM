@@ -30,16 +30,25 @@ export function DataRefresh({
     setPending(true);
     setState({});
     try {
-      const res = await fetch('/api/sync', { method: 'POST' });
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        // Surface a hung request as an error instead of spinning forever.
+        signal: AbortSignal.timeout(120_000),
+      });
       const json: RefreshState = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) {
-        setState({ error: json.error ?? `Refresh failed (${res.status})` });
+        setState({ error: json.error ?? `Refresh failed (${res.status}). Try again in a minute.` });
       } else {
         setState({ ok: true, message: json.message });
         router.refresh(); // pull the new freshness numbers into view
       }
-    } catch {
-      setState({ error: 'Network error — please try again.' });
+    } catch (e) {
+      const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+      setState({
+        error: timedOut
+          ? 'The refresh is taking too long — it may still finish in the background. Reload the page in a minute to check.'
+          : 'Network error — please try again.',
+      });
     } finally {
       setPending(false);
     }

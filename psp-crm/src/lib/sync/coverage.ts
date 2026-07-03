@@ -30,7 +30,7 @@ export async function getDataCoverage(): Promise<DataCoverage> {
   const supabase = await createClient();
 
   const [settings, earliest, latest, count, lastSync] = await Promise.all([
-    supabase.from('app_settings').select('as_of_date').eq('id', true).maybeSingle(),
+    supabase.from('app_settings').select('as_of_date,updated_at').eq('id', true).maybeSingle(),
     supabase
       .from('sales_transactions')
       .select('date')
@@ -63,7 +63,10 @@ export async function getDataCoverage(): Promise<DataCoverage> {
     spanEnd,
     months: spanStart && spanEnd ? monthsBetween(spanStart, spanEnd) : null,
     txnCount: count.count ?? 0,
-    lastRefreshed: lastSync.data?.created_at ?? null,
+    // Audit log is the richest source, but its backing SQL function may not be
+    // installed; every sync also stamps app_settings.updated_at, so fall back
+    // to that rather than showing "Never" after a successful refresh.
+    lastRefreshed: lastSync.data?.created_at ?? settings.data?.updated_at ?? null,
     lastInserted: typeof diff.inserted === 'number' ? diff.inserted : null,
   };
 }

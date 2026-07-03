@@ -9,7 +9,7 @@ import {
   getWhitespaceSummary,
   getPastCadenceCount,
 } from '@/lib/metrics/queries';
-import { fmtCurrencyShort, fmtPct, fmtDeltaPct, fmtDate, fmtCurrency } from '@/lib/format';
+import { fmtCurrencyShort, fmtPct, fmtDeltaPct, fmtCurrency, fmtMonthYear } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -211,12 +211,17 @@ function WsRow({ label, count, value }: { label: string; count?: number; value?:
 }
 
 function PageHeader({ role, asOf }: { role: string; asOf?: string }) {
+  // as_of is stored as the period's month-END for window math; rendering that
+  // raw date reads as future data mid-month. Show the period label instead,
+  // flagged month-to-date while the period is still in progress.
+  const inProgress = !!asOf && asOf > new Date().toISOString().slice(0, 10);
   return (
     <div className="flex flex-wrap items-end justify-between gap-2">
       <div>
         <h1 className="text-charcoal text-xl font-bold tracking-tight">Coverage Dashboard</h1>
         <p className="text-muted text-sm">
-          {role === 'rep' ? 'Your book' : 'Full portfolio'} · as of {fmtDate(asOf)}
+          {role === 'rep' ? 'Your book' : 'Full portfolio'} · {fmtMonthYear(asOf)}
+          {inProgress ? ' (month-to-date)' : ''}
         </p>
       </div>
     </div>

@@ -36,7 +36,7 @@ function endOfMonth(iso: string): string {
 export async function runImport(
   supabase: SupabaseClient<Database>,
   dataset: ImportDataset,
-  opts: { asOfDate?: string } = {},
+  opts: { asOfDate?: string; sinceDate?: string } = {},
 ): Promise<ImportSummary> {
   // ── accounts ──────────────────────────────────────────────────────────────
   const { data: existingAccounts, error: aErr } = await supabase.from('accounts').select('id,name');
@@ -83,14 +83,19 @@ export async function runImport(
   }
 
   // ── transactions (dedupe on invoice+so+line) ───────────────────────────────
+  // On incremental syncs every incoming row is dated >= sinceDate, so only
+  // existing keys in that window can collide — scoping the scan avoids paging
+  // the entire history on every refresh.
   const existingKeys = new Set<string>();
   {
     const pageSize = 1000;
     for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase
+      let q = supabase
         .from('sales_transactions')
         .select('invoice_nbr,so_nbr,line_nbr')
         .range(from, from + pageSize - 1);
+      if (opts.sinceDate) q = q.gte('date', opts.sinceDate);
+      const { data, error } = await q;
       if (error) throw error;
       if (!data || data.length === 0) break;
       for (const t of data) existingKeys.add(dedupeKey(t.invoice_nbr, t.so_nbr, t.line_nbr));
@@ -156,9 +161,11 @@ export async function runImport(
   const maxDate = bookedDates[bookedDates.length - 1];
   const asOfDate =
     opts.asOfDate ?? (maxDate ? endOfMonth(maxDate) : new Date().toISOString().slice(0, 10));
+  // updated_at doubles as the "last refreshed" timestamp (no trigger on this
+  // table), so stamp it explicitly.
   const { error: settErr } = await supabase
     .from('app_settings')
-    .update({ as_of_date: asOfDate })
+    .update({ as_of_date: asOfDate, updated_at: new Date().toISOString() })
     .eq('id', true);
   if (settErr) throw settErr;
 
