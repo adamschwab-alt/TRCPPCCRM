@@ -43,11 +43,11 @@ export class AcumaticaODataAdapter implements DataSourceAdapter {
     // /OData/<tenant> feed is OData v3, so the incremental $filter uses the
     // datetime'...' literal. When no modified field is configured we filter on
     // the inquiry's Date column — this is what keeps routine refreshes small.
-    const buildFirstUrl = (withFilter: boolean) => {
+    const buildFirstUrl = (withFilter: boolean, fieldOverride?: string) => {
       const u = new URL(url);
       if (!u.searchParams.has('$format')) u.searchParams.set('$format', 'json');
       if (withFilter && since) {
-        const field = modifiedField ?? 'Date';
+        const field = fieldOverride ?? modifiedField ?? 'Date';
         u.searchParams.set('$filter', `${field} ge datetime'${since}T00:00:00'`);
       }
       return u.toString();
@@ -55,6 +55,7 @@ export class AcumaticaODataAdapter implements DataSourceAdapter {
 
     let filtered = !!since;
     let firstPage = true;
+    let triedDateField = false;
     let next: string | null = buildFirstUrl(filtered);
 
     const records: Record<string, unknown>[] = [];
@@ -78,9 +79,16 @@ export class AcumaticaODataAdapter implements DataSourceAdapter {
         throw e;
       }
       if (!res.ok) {
-        // If the server rejects the incremental $filter, fall back to a full
-        // pull rather than failing the sync outright.
-        if (res.status === 400 && filtered && firstPage) {
+        // If the first filtered page fails for ANY reason, retry: first with
+        // the default Date filter (a misconfigured modified-field env var
+        // yields a 500 "Could not find a property named ..."), then with no
+        // filter at all. A slow full pull beats a failed sync.
+        if (filtered && firstPage) {
+          if (modifiedField && !triedDateField) {
+            triedDateField = true;
+            next = buildFirstUrl(true, 'Date');
+            continue;
+          }
           filtered = false;
           next = buildFirstUrl(false);
           continue;
