@@ -36,7 +36,12 @@ export function NavBar({
   const staff = role === 'admin' || role === 'manager';
   const items = [
     ...NAV,
-    ...(staff ? [{ href: '/call-tracking', label: 'Call Tracking' }] : []),
+    ...(staff
+      ? [
+          { href: '/call-tracking', label: 'Call Tracking' },
+          { href: '/reports', label: 'Reports' },
+        ]
+      : []),
     ...(role === 'admin' ? [{ href: '/admin', label: 'Admin' }] : []),
   ];
 

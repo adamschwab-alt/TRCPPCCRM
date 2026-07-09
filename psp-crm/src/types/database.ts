@@ -248,6 +248,18 @@ export type ExogenousEventRow = {
   created_at: string;
 };
 
+export type ForecastSnapshotRow = {
+  id: number;
+  period: string; // 'YYYY-MM'
+  rep_id: string | null; // null = org
+  pipeline_amount: number;
+  best_case_amount: number;
+  commit_amount: number;
+  weighted_amount: number;
+  open_count: number;
+  created_at: string;
+};
+
 export type DqSnapshotRow = {
   id: number;
   period: string; // 'YYYY-MM'
@@ -351,6 +363,7 @@ export interface Database {
       exogenous_events: TableDef<ExogenousEventRow>;
       ai_recommendations: TableDef<AiRecommendationRow>;
       dq_snapshots: TableDef<DqSnapshotRow>;
+      forecast_snapshots: TableDef<ForecastSnapshotRow>;
       audit_log: TableDef<AuditLogRow>;
       targets: TableDef<TargetsRow>;
       app_settings: TableDef<AppSettingsRow>;

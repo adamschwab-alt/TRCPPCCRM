@@ -38,6 +38,13 @@ export async function GET(request: NextRequest) {
     } catch {
       /* pre-0010 database — next night catches up */
     }
+    // Month-start forecast freeze (blueprint Phase 4) — write-once per period.
+    try {
+      const { snapshotForecast } = await import('@/lib/forecast/queries');
+      await snapshotForecast(supabase);
+    } catch {
+      /* pre-0011 database — next night catches up */
+    }
     return NextResponse.json({ ok: true, result, outcomesFilled });
   } catch (e) {
     return NextResponse.json(
