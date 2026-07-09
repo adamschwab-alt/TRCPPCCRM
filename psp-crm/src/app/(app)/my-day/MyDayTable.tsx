@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { logTouch, type TouchState } from './actions';
-import type { MyDayRow } from '@/lib/myday/queries';
+import type { MyDayRow, ContactOption } from '@/lib/myday/queries';
 import type { ReasonKey } from '@/lib/myday/score';
 import { fmtCurrencyShort, fmtDeltaPct } from '@/lib/format';
 
@@ -15,7 +15,15 @@ const REASON_STYLE: Record<ReasonKey, string> = {
   whitespace: 'bg-brand-50 text-brand-700',
 };
 
-export function MyDayTable({ rows, showOwner }: { rows: MyDayRow[]; showOwner: boolean }) {
+export function MyDayTable({
+  rows,
+  showOwner,
+  contactsByAccount = {},
+}: {
+  rows: MyDayRow[];
+  showOwner: boolean;
+  contactsByAccount?: Record<string, ContactOption[]>;
+}) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<SortKey>('priority');
 
@@ -72,7 +80,13 @@ export function MyDayTable({ rows, showOwner }: { rows: MyDayRow[]; showOwner: b
       ) : (
         <ul className="space-y-2">
           {view.map((r, i) => (
-            <WorkCard key={r.branch.branch_id} row={r} rank={i + 1} showOwner={showOwner} />
+            <WorkCard
+              key={r.branch.branch_id}
+              row={r}
+              rank={i + 1}
+              showOwner={showOwner}
+              contacts={contactsByAccount[r.branch.account_id] ?? []}
+            />
           ))}
         </ul>
       )}
@@ -80,7 +94,17 @@ export function MyDayTable({ rows, showOwner }: { rows: MyDayRow[]; showOwner: b
   );
 }
 
-function WorkCard({ row, rank, showOwner }: { row: MyDayRow; rank: number; showOwner: boolean }) {
+function WorkCard({
+  row,
+  rank,
+  showOwner,
+  contacts,
+}: {
+  row: MyDayRow;
+  rank: number;
+  showOwner: boolean;
+  contacts: ContactOption[];
+}) {
   const [open, setOpen] = useState(false);
   const b = row.branch;
 
@@ -110,6 +134,14 @@ function WorkCard({ row, rank, showOwner }: { row: MyDayRow; rank: number; showO
                 {reason.label}
               </span>
             ))}
+            {row.wiring && row.wiring.intervalDays != null && (
+              <span
+                className="bg-canvas text-muted rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                title="Customer wiring: account size × relationship → target touch frequency"
+              >
+                {row.wiring.size}×{row.wiring.rating} · every {row.wiring.intervalDays}d
+              </span>
+            )}
           </div>
         </div>
 
@@ -140,7 +172,7 @@ function WorkCard({ row, rank, showOwner }: { row: MyDayRow; rank: number; showO
         </button>
       </div>
 
-      {open && <TouchForm row={row} onDone={() => setOpen(false)} />}
+      {open && <TouchForm row={row} contacts={contacts} onDone={() => setOpen(false)} />}
     </li>
   );
 }
@@ -172,7 +204,15 @@ function Metric({
   );
 }
 
-function TouchForm({ row, onDone }: { row: MyDayRow; onDone: () => void }) {
+function TouchForm({
+  row,
+  contacts,
+  onDone,
+}: {
+  row: MyDayRow;
+  contacts: ContactOption[];
+  onDone: () => void;
+}) {
   const [state, action, pending] = useActionState<TouchState, FormData>(logTouch, {});
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
@@ -197,6 +237,20 @@ function TouchForm({ row, onDone }: { row: MyDayRow; onDone: () => void }) {
             <option value="note">📝 Note</option>
           </select>
         </label>
+        {contacts.length > 0 && (
+          <label className="block">
+            <span className="text-charcoal-2 mb-1 block text-xs font-medium">Who (optional)</span>
+            <select name="contact_id" className="input py-1.5" defaultValue="">
+              <option value="">— contact —</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.title ? ` (${c.title})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="block flex-1">
           <span className="text-charcoal-2 mb-1 block text-xs font-medium">Note (optional)</span>
           <input

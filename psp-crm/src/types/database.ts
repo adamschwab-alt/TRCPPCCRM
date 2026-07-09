@@ -30,6 +30,23 @@ export type AccountRow = {
   name: string;
   primary_state: string | null;
   owner_id: string | null;
+  /** Customer-wiring relationship rating: 1 strategic · 2 important · 3 transactional. */
+  relationship_rating: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Contact tiers: 1 Executive · 2 Regional/District · 3 Ops/Fleet · 4 Purchasing/Finance · 5 Branch */
+export type ContactRow = {
+  id: string;
+  account_id: string;
+  branch_id: string | null;
+  name: string;
+  title: string | null;
+  tier: number;
+  phone: string | null;
+  email: string | null;
+  covered_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -181,6 +198,7 @@ export type ActivityRow = {
   account_id: string | null;
   branch_id: string | null;
   opportunity_id: string | null;
+  contact_id: string | null;
   user_id: string | null;
   occurred_at: string;
   body: string | null;
@@ -231,6 +249,7 @@ export interface Database {
       profiles: TableDef<ProfileRow>;
       accounts: TableDef<AccountRow>;
       branches: TableDef<BranchRow>;
+      contacts: TableDef<ContactRow>;
       sales_transactions: TableDef<SalesTransactionRow>;
       opportunities: TableDef<OpportunityRow>;
       activities: TableDef<ActivityRow>;

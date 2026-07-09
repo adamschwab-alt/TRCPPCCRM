@@ -67,10 +67,14 @@ function recencyFactor(daysSinceTouch: number | null): number {
 /**
  * Score one branch. Returns null when the branch has no actionable signal —
  * those don't belong on a rep's "to work" list.
+ *
+ * @param cadenceDays per-branch target reorder/touch interval (customer-wiring
+ *   interval of the parent account). null = no proactive cadence (E×3 wiring) —
+ *   idleness alone never flags such branches.
  */
 export function scoreBranch(
   b: BranchMetricsRow,
-  cadenceDays: number,
+  cadenceDays: number | null,
   touch: TouchSummary | undefined,
   now: number,
 ): ScoredBranch | null {
@@ -106,8 +110,8 @@ export function scoreBranch(
     });
   }
 
-  // ── overdue (idle past cadence) ─────────────────────────────────────────────
-  const overdue = b.days_idle != null && b.days_idle > cadenceDays;
+  // ── overdue (idle past the account's wiring cadence) ───────────────────────
+  const overdue = cadenceDays != null && b.days_idle != null && b.days_idle > cadenceDays;
   if (overdue) {
     reasons.push({ key: 'overdue', label: `Idle ${b.days_idle}d`, dollars: b.ttm_revenue });
   }
@@ -121,7 +125,9 @@ export function scoreBranch(
 
   // Urgency: 1× at cadence, ramping to 2× at 2× cadence and beyond.
   const urgency =
-    b.days_idle != null ? 1 + clamp((b.days_idle - cadenceDays) / cadenceDays, 0, 1) : 1;
+    cadenceDays != null && b.days_idle != null
+      ? 1 + clamp((b.days_idle - cadenceDays) / cadenceDays, 0, 1)
+      : 1;
 
   const daysSinceTouch = touch?.lastTouchAt != null ? daysBetween(touch.lastTouchAt, now) : null;
   const priority = impact * urgency * recencyFactor(daysSinceTouch);
@@ -180,15 +186,17 @@ export function summarize(scored: ScoredBranch[]): MyDaySummary {
   return s;
 }
 
-/** Score, drop non-actionable, sort by priority desc. */
+/** Score, drop non-actionable, sort by priority desc. `cadence` may be a flat
+ *  number of days or a per-branch resolver (customer-wiring interval). */
 export function buildWorklist(
   branches: BranchMetricsRow[],
-  cadenceDays: number,
+  cadence: number | ((b: BranchMetricsRow) => number | null),
   touches: Map<string, TouchSummary>,
   now: number,
 ): ScoredBranch[] {
+  const cadenceFor = typeof cadence === 'number' ? () => cadence : cadence;
   return branches
-    .map((b) => scoreBranch(b, cadenceDays, touches.get(b.branch_id), now))
+    .map((b) => scoreBranch(b, cadenceFor(b), touches.get(b.branch_id), now))
     .filter((x): x is ScoredBranch => x !== null)
     .sort((a, b) => b.priority - a.priority);
 }

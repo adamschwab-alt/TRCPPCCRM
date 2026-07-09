@@ -3,6 +3,9 @@ import { notFound } from 'next/navigation';
 import { Card, KpiTile, SectionTitle, StatusBadge, RagBadge } from '@/components/ui';
 import { getAccount, getBranchesForAccount } from '@/lib/metrics/queries';
 import { fmtCurrencyShort, fmtDeltaPct, fmtPct, fmtDate, whiteSpaceLabel } from '@/lib/format';
+import { createClient } from '@/lib/supabase/server';
+import { WiringCard, ContactsCard } from './CrmCards';
+import type { ContactRow } from '@/types/database';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +14,16 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   const account = await getAccount(id);
   if (!account) notFound();
   const branches = await getBranchesForAccount(id);
+
+  // Wiring + contacts (0007). select('*') and a tolerated contacts error keep
+  // the page working on a database that hasn't run the migration yet.
+  const supabase = await createClient();
+  const [{ data: accountRow }, contactsRes] = await Promise.all([
+    supabase.from('accounts').select('*').eq('id', id).maybeSingle(),
+    supabase.from('contacts').select('*').eq('account_id', id).order('tier'),
+  ]);
+  const rating = (accountRow as { relationship_rating?: number } | null)?.relationship_rating ?? 2;
+  const contacts: ContactRow[] = contactsRes.data ?? [];
 
   return (
     <div>
@@ -54,6 +67,21 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
           value={fmtDate(account.last_order_date)}
           sub={account.days_idle !== null ? `${account.days_idle}d idle` : '—'}
         />
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card className="p-4">
+          <SectionTitle>Relationship &amp; cadence</SectionTitle>
+          <WiringCard
+            accountId={account.account_id}
+            ttmRevenue={account.ttm_revenue}
+            rating={rating}
+          />
+        </Card>
+        <Card className="p-4">
+          <SectionTitle>Contacts ({contacts.length})</SectionTitle>
+          <ContactsCard accountId={account.account_id} contacts={contacts} />
+        </Card>
       </div>
 
       <div className="mt-6">

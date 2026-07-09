@@ -84,6 +84,80 @@ export async function updateAccount(
   redirect(`/accounts/${id}`);
 }
 
+/**
+ * Customer-wiring relationship rating (1 strategic / 2 important / 3
+ * transactional). Crossed with TTM size it drives the account's touch cadence.
+ * RLS limits writes to staff or the owning rep.
+ */
+export async function setRelationshipRating(
+  accountId: string,
+  rating: number,
+): Promise<{ error?: string }> {
+  await requireSession();
+  if (![1, 2, 3].includes(rating)) return { error: 'Rating must be 1, 2, or 3' };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('accounts')
+    .update({ relationship_rating: rating })
+    .eq('id', accountId);
+  if (error) return { error: error.message };
+  await logAudit(supabase, 'update', 'account', accountId, { relationship_rating: rating });
+  revalidatePath(`/accounts/${accountId}`);
+  revalidatePath('/my-day');
+  return {};
+}
+
+const contactSchema = z.object({
+  account_id: z.string().uuid(),
+  name: z.string().min(1, 'Name is required'),
+  title: z.preprocess(emptyToNull, z.string().nullable()),
+  tier: z.coerce.number().int().min(1).max(5),
+  phone: z.preprocess(emptyToNull, z.string().nullable()),
+  email: z.preprocess(emptyToNull, z.string().email('Invalid email').nullable()),
+  covered_by: z.preprocess(emptyToNull, z.string().nullable()),
+});
+
+export async function saveContact(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireSession();
+  const id = String(formData.get('id') || '');
+  const parsed = contactSchema.safeParse({
+    account_id: formData.get('account_id'),
+    name: formData.get('name'),
+    title: formData.get('title'),
+    tier: formData.get('tier'),
+    phone: formData.get('phone'),
+    email: formData.get('email'),
+    covered_by: formData.get('covered_by'),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+
+  const supabase = await createClient();
+  const { error } = id
+    ? await supabase.from('contacts').update(parsed.data).eq('id', id)
+    : await supabase.from('contacts').insert(parsed.data);
+  if (error) {
+    return {
+      error: /relation .* does not exist/i.test(error.message)
+        ? 'The contacts table is not set up yet — run the 0007 migration in Supabase first.'
+        : error.message,
+    };
+  }
+  await logAudit(supabase, id ? 'update' : 'create', 'contact', id || null, {
+    account_id: parsed.data.account_id,
+    name: parsed.data.name,
+  });
+  revalidatePath(`/accounts/${parsed.data.account_id}`);
+  return {};
+}
+
+export async function deleteContact(id: string, accountId: string): Promise<void> {
+  await requireSession();
+  const supabase = await createClient();
+  await supabase.from('contacts').delete().eq('id', id);
+  await logAudit(supabase, 'delete', 'contact', id, { account_id: accountId });
+  revalidatePath(`/accounts/${accountId}`);
+}
+
 export async function createBranch(_prev: FormState, formData: FormData): Promise<FormState> {
   const { userId, profile } = await requireSession();
   const parsed = branchSchema.safeParse({
