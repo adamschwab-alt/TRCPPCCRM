@@ -1,6 +1,14 @@
 import Link from 'next/link';
 import { Card, KpiTile, SectionTitle } from '@/components/ui';
-import { getOpportunities, getTargets, type EnrichedOpportunity } from '@/lib/pipeline/queries';
+import {
+  getOpportunities,
+  getTargets,
+  getOppRisk,
+  type EnrichedOpportunity,
+} from '@/lib/pipeline/queries';
+import { requireSession } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+import { logRiskShown } from '@/lib/ai/recs';
 import { fmtCurrencyShort, fmtPct } from '@/lib/format';
 import type { OppStage } from '@/types/database';
 import { PipelineTable } from './PipelineTable';
@@ -11,7 +19,25 @@ const STAGES: OppStage[] = ['Qualified', 'Quoted', 'Verbal', 'Won', 'Lost'];
 const OPEN: OppStage[] = ['Qualified', 'Quoted', 'Verbal'];
 
 export default async function PipelinePage() {
+  const { userId } = await requireSession();
   const [opps, targets] = await Promise.all([getOpportunities(), getTargets()]);
+  const riskByOpp = await getOppRisk(opps);
+
+  // Flags the viewer saw today = AI exposure (logged once per opp per day).
+  if (Object.keys(riskByOpp).length > 0) {
+    const supabase = await createClient();
+    await logRiskShown(
+      supabase,
+      userId,
+      Object.entries(riskByOpp).map(([oppId, r]) => ({
+        opportunityId: oppId,
+        accountId: opps.find((o) => o.id === oppId)?.account_id ?? null,
+        label: r.flags.map((f) => f.label).join(' · '),
+        detail: r.flags.map((f) => f.detail).join(' '),
+        score: r.score,
+      })),
+    ).catch(() => {}); // pre-0009 database → skip silently
+  }
 
   const open = opps.filter((o) => OPEN.includes(o.stage));
   const totalAmount = open.reduce((s, o) => s + (o.amount ?? 0), 0);
@@ -111,7 +137,7 @@ export default async function PipelinePage() {
             No opportunities yet — click “New opportunity”.
           </Card>
         ) : (
-          <PipelineTable rows={opps} />
+          <PipelineTable rows={opps} riskByOpp={riskByOpp} />
         )}
       </section>
     </div>

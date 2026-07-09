@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { riskFlags, riskScore, type RiskFlag } from '@/lib/ai/risk';
 import type { OpportunityRow, StageWinProbRow, TargetsRow } from '@/types/database';
 
 export type EnrichedOpportunity = OpportunityRow & {
@@ -67,4 +68,49 @@ export async function getTargets(): Promise<TargetsRow | null> {
   const supabase = await createClient();
   const { data } = await supabase.from('targets').select('*').eq('id', true).maybeSingle();
   return data;
+}
+
+// ── Deal-risk flags (rules-v1) ───────────────────────────────────────────────
+export type OppRisk = { flags: RiskFlag[]; score: number };
+
+/**
+ * Compute risk flags for open opportunities using stage history for
+ * days-in-stage and close-date slips. Tolerates a pre-0008 database (no
+ * history) by falling back to created_at and zero slips.
+ */
+export async function getOppRisk(opps: EnrichedOpportunity[]): Promise<Record<string, OppRisk>> {
+  const open = opps.filter((o) => o.stage !== 'Won' && o.stage !== 'Lost');
+  if (open.length === 0) return {};
+  const supabase = await createClient();
+
+  const { data: hist } = await supabase
+    .from('opportunity_stage_history')
+    .select('opportunity_id,field,old_value,new_value,changed_at')
+    .in(
+      'opportunity_id',
+      open.map((o) => o.id).slice(0, 300),
+    );
+
+  const lastStageChange = new Map<string, string>();
+  const slips = new Map<string, number>();
+  for (const h of hist ?? []) {
+    if (h.field === 'stage' || h.field === 'created') {
+      const prev = lastStageChange.get(h.opportunity_id);
+      if (!prev || h.changed_at > prev) lastStageChange.set(h.opportunity_id, h.changed_at);
+    }
+    if (h.field === 'expected_close' && h.old_value && h.new_value && h.new_value > h.old_value) {
+      slips.set(h.opportunity_id, (slips.get(h.opportunity_id) ?? 0) + 1);
+    }
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+  const out: Record<string, OppRisk> = {};
+  for (const o of open) {
+    const since = lastStageChange.get(o.id) ?? o.created_at;
+    const daysInStage = Math.floor((now - new Date(since).getTime()) / 86_400_000);
+    const flags = riskFlags({ opp: o, daysInStage, slipCount: slips.get(o.id) ?? 0 }, today);
+    if (flags.length > 0) out[o.id] = { flags, score: riskScore(flags) };
+  }
+  return out;
 }

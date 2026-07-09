@@ -1,9 +1,10 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { logTouch, type TouchState } from './actions';
+import { logTouch, dismissRecommendation, type TouchState } from './actions';
 import type { MyDayRow, ContactOption } from '@/lib/myday/queries';
+import type { RecRef } from '@/lib/ai/recs';
 import type { ReasonKey } from '@/lib/myday/score';
 import { fmtCurrencyShort, fmtDeltaPct } from '@/lib/format';
 
@@ -19,10 +20,12 @@ export function MyDayTable({
   rows,
   showOwner,
   contactsByAccount = {},
+  recByBranch = {},
 }: {
   rows: MyDayRow[];
   showOwner: boolean;
   contactsByAccount?: Record<string, ContactOption[]>;
+  recByBranch?: Record<string, RecRef>;
 }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<SortKey>('priority');
@@ -86,6 +89,7 @@ export function MyDayTable({
               rank={i + 1}
               showOwner={showOwner}
               contacts={contactsByAccount[r.branch.account_id] ?? []}
+              rec={recByBranch[r.branch.branch_id]}
             />
           ))}
         </ul>
@@ -99,13 +103,16 @@ function WorkCard({
   rank,
   showOwner,
   contacts,
+  rec,
 }: {
   row: MyDayRow;
   rank: number;
   showOwner: boolean;
   contacts: ContactOption[];
+  rec?: RecRef;
 }) {
   const [open, setOpen] = useState(false);
+  const [dismissing, startDismiss] = useTransition();
   const b = row.branch;
 
   return (
@@ -162,17 +169,36 @@ function WorkCard({
           tone={row.needsTouch ? 'warn' : 'neutral'}
         />
 
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="btn-secondary px-3 py-1.5 text-sm"
-          data-tap
-        >
-          {open ? 'Close' : 'Log touch'}
-        </button>
+        <div className="flex items-center gap-2">
+          {rec?.status === 'shown' && (
+            <button
+              type="button"
+              disabled={dismissing}
+              onClick={() => startDismiss(() => dismissRecommendation(rec.id))}
+              className="text-muted hover:text-charcoal text-xs"
+              title="Not relevant — dismiss this suggestion (logged)"
+              data-tap
+            >
+              ✕ Skip
+            </button>
+          )}
+          {rec?.status === 'dismissed' && (
+            <span className="text-muted text-xs" title="You dismissed this suggestion today">
+              skipped
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="btn-secondary px-3 py-1.5 text-sm"
+            data-tap
+          >
+            {open ? 'Close' : 'Log touch'}
+          </button>
+        </div>
       </div>
 
-      {open && <TouchForm row={row} contacts={contacts} onDone={() => setOpen(false)} />}
+      {open && <TouchForm row={row} contacts={contacts} rec={rec} onDone={() => setOpen(false)} />}
     </li>
   );
 }
@@ -207,10 +233,12 @@ function Metric({
 function TouchForm({
   row,
   contacts,
+  rec,
   onDone,
 }: {
   row: MyDayRow;
   contacts: ContactOption[];
+  rec?: RecRef;
   onDone: () => void;
 }) {
   const [state, action, pending] = useActionState<TouchState, FormData>(logTouch, {});
@@ -227,6 +255,9 @@ function TouchForm({
     <form ref={ref} action={action} className="border-line bg-canvas/60 border-t p-3">
       <input type="hidden" name="branch_id" value={row.branch.branch_id} />
       <input type="hidden" name="account_id" value={row.branch.account_id} />
+      {rec && rec.status === 'shown' && (
+        <input type="hidden" name="recommendation_id" value={rec.id} />
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">
           <span className="text-charcoal-2 mb-1 block text-xs font-medium">Type</span>

@@ -5,9 +5,13 @@ import { getAccount, getBranchesForAccount } from '@/lib/metrics/queries';
 import { fmtCurrencyShort, fmtDeltaPct, fmtPct, fmtDate, whiteSpaceLabel } from '@/lib/format';
 import { createClient } from '@/lib/supabase/server';
 import { WiringCard, ContactsCard } from './CrmCards';
+import { BriefCard } from './BriefCard';
+import { aiConfigured } from '@/lib/ai/brief';
 import type { ContactRow } from '@/types/database';
 
 export const dynamic = 'force-dynamic';
+// The AI brief server action calls the Claude API (up to ~30s incl. retries).
+export const maxDuration = 60;
 
 export default async function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -67,6 +71,13 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
           value={fmtDate(account.last_order_date)}
           sub={account.days_idle !== null ? `${account.days_idle}d idle` : '—'}
         />
+      </div>
+
+      <div className="mt-6">
+        <Card className="p-4">
+          <SectionTitle>Pre-call brief (AI)</SectionTitle>
+          <BriefCard accountId={account.account_id} configured={aiConfigured()} />
+        </Card>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">

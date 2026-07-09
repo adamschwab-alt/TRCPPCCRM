@@ -14,6 +14,7 @@ const touchSchema = z.object({
   branch_id: z.string().uuid(),
   account_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
   contact_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
+  recommendation_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
   type: z.enum(['call', 'visit', 'email', 'note']),
   body: z.preprocess(emptyToNull, z.string().max(2000).nullable()),
 });
@@ -29,6 +30,7 @@ export async function logTouch(_prev: TouchState, formData: FormData): Promise<T
     branch_id: formData.get('branch_id'),
     account_id: formData.get('account_id'),
     contact_id: formData.get('contact_id'),
+    recommendation_id: formData.get('recommendation_id'),
     type: formData.get('type'),
     body: formData.get('body'),
   });
@@ -46,11 +48,45 @@ export async function logTouch(_prev: TouchState, formData: FormData): Promise<T
   // contact_id column arrives with migration 0007 — only send it when used, so
   // touch logging keeps working on databases that haven't run it yet.
   if (parsed.data.contact_id) insert.contact_id = parsed.data.contact_id;
-  const { error } = await supabase.from('activities').insert(insert);
+  const { data: created, error } = await supabase
+    .from('activities')
+    .insert(insert)
+    .select('id')
+    .single();
   if (error) return { error: error.message };
+
+  // Touch came from an AI next-best-action card → mark the recommendation
+  // accepted and link the resulting activity (the attribution edge).
+  if (parsed.data.recommendation_id) {
+    await supabase
+      .from('ai_recommendations')
+      .update({
+        status: 'accepted',
+        acted_at: new Date().toISOString(),
+        action_activity_id: created?.id ?? null,
+      })
+      .eq('id', parsed.data.recommendation_id)
+      .eq('user_id', userId);
+  }
 
   await logAudit(supabase, 'touch', 'branch', parsed.data.branch_id, { type: parsed.data.type });
   revalidatePath('/my-day');
   revalidatePath('/activities');
   return { ok: true };
+}
+
+/** Rep marks an AI suggestion as not relevant — logged, never deleted. */
+export async function dismissRecommendation(recId: string, note?: string): Promise<void> {
+  const { userId } = await requireSession();
+  const supabase = await createClient();
+  await supabase
+    .from('ai_recommendations')
+    .update({
+      status: 'dismissed',
+      acted_at: new Date().toISOString(),
+      override_note: note ?? null,
+    })
+    .eq('id', recId)
+    .eq('user_id', userId);
+  revalidatePath('/my-day');
 }

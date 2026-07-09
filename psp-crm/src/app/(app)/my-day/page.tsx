@@ -1,6 +1,8 @@
 import { KpiTile, Card, SectionTitle } from '@/components/ui';
 import { requireSession, isStaff } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
 import { getMyDayData, getReps, getScorecard, type ScorecardRow } from '@/lib/myday/queries';
+import { logNbaShown, type RecRef } from '@/lib/ai/recs';
 import { fmtCurrencyShort, fmtPct, fmtDeltaPct } from '@/lib/format';
 import { RepPicker } from './RepPicker';
 import { MyDayTable } from './MyDayTable';
@@ -25,6 +27,28 @@ export default async function MyDayPage({
     staff ? getScorecard() : Promise.resolve([] as ScorecardRow[]),
   ]);
   const { rows, summary, contactsByAccount } = data;
+
+  // A rep viewing their own queue = an AI exposure event. Log today's top 10 as
+  // next-best-action recommendations (dedup per day) and wire accept/dismiss.
+  // Staff browsing other books is not exposure and is not logged.
+  let recByBranch: Record<string, RecRef> = {};
+  if (!staff && rows.length > 0) {
+    const supabase = await createClient();
+    const map = await logNbaShown(
+      supabase,
+      userId,
+      rows.slice(0, 10).map((r) => ({
+        branchId: r.branch.branch_id,
+        accountId: r.branch.account_id,
+        action: `Work ${r.branch.branch_name}: ${r.reasons.map((x) => x.label).join(', ')}`,
+        reason: r.wiring
+          ? `${r.wiring.size}×${r.wiring.rating} wiring · $${Math.round(r.impact).toLocaleString('en-US')} at stake`
+          : `$${Math.round(r.impact).toLocaleString('en-US')} at stake`,
+        score: Math.round(r.priority),
+      })),
+    ).catch(() => new Map<string, RecRef>()); // pre-0009 database → skip silently
+    recByBranch = Object.fromEntries(map);
+  }
 
   const selectedRepName = staff && repId ? reps.find((r) => r.id === repId)?.name : null;
 
@@ -158,7 +182,12 @@ export default async function MyDayPage({
         queue moving.
       </p>
 
-      <MyDayTable rows={rows} showOwner={staff && !repId} contactsByAccount={contactsByAccount} />
+      <MyDayTable
+        rows={rows}
+        showOwner={staff && !repId}
+        contactsByAccount={contactsByAccount}
+        recByBranch={recByBranch}
+      />
     </div>
   );
 }

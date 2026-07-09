@@ -23,7 +23,15 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = createAdminClient();
     const result = await performSync(supabase);
-    return NextResponse.json({ ok: true, result });
+    // Nightly AI-outcome back-fill (blueprint §4) — best-effort, never fails the sync.
+    let outcomesFilled = 0;
+    try {
+      const { backfillRecOutcomes } = await import('@/lib/ai/recs');
+      outcomesFilled = await backfillRecOutcomes(supabase);
+    } catch {
+      /* pre-0009 database or transient error — next night catches up */
+    }
+    return NextResponse.json({ ok: true, result, outcomesFilled });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : 'sync failed' },

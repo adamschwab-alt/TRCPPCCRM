@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fmtCurrencyShort, fmtDate, fmtPct } from '@/lib/format';
-import type { EnrichedOpportunity } from '@/lib/pipeline/queries';
+import type { EnrichedOpportunity, OppRisk } from '@/lib/pipeline/queries';
 
 const typeLabel = (t: string | null) =>
   t === 'new_branch_activation'
@@ -16,8 +16,33 @@ const typeLabel = (t: string | null) =>
           ? 'Expansion'
           : '—';
 
-export function PipelineTable({ rows }: { rows: EnrichedOpportunity[] }) {
+export function PipelineTable({
+  rows,
+  riskByOpp = {},
+}: {
+  rows: EnrichedOpportunity[];
+  riskByOpp?: Record<string, OppRisk>;
+}) {
   const columns: Column<EnrichedOpportunity>[] = [
+    {
+      key: 'risk',
+      header: '⚠',
+      sort: (o) => riskByOpp[o.id]?.score ?? 0,
+      filter: (o) => (riskByOpp[o.id] ? 'at-risk ' + riskByOpp[o.id].flags.map((f) => f.label).join(' ') : ''),
+      cell: (o) => {
+        const r = riskByOpp[o.id];
+        if (!r) return <span className="text-muted">—</span>;
+        return (
+          <span
+            className="inline-block rounded-full bg-[var(--color-watch-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-watch)]"
+            title={r.flags.map((f) => `${f.label}: ${f.detail}`).join('\n')}
+          >
+            ⚠ {r.flags[0].label}
+            {r.flags.length > 1 ? ` +${r.flags.length - 1}` : ''}
+          </span>
+        );
+      },
+    },
     {
       key: 'account',
       header: 'Account',
@@ -83,7 +108,7 @@ export function PipelineTable({ rows }: { rows: EnrichedOpportunity[] }) {
     },
   ];
 
-  const onMobile = new Set(['account', 'stage', 'amount']);
+  const onMobile = new Set(['account', 'stage', 'amount', 'risk']);
   for (const c of columns) c.hideOnMobile = !onMobile.has(c.key);
 
   return (

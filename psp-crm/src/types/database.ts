@@ -38,6 +38,8 @@ export type ActivityOutcome =
   | 'no_response'
   | 'meeting_booked'
   | 'meeting_held';
+export type RecType = 'next_best_action' | 'account_summary' | 'deal_risk';
+export type RecStatus = 'shown' | 'accepted' | 'dismissed';
 
 export type ProfileRow = {
   id: string;
@@ -246,6 +248,28 @@ export type ExogenousEventRow = {
   created_at: string;
 };
 
+export type AiRecommendationRow = {
+  id: string;
+  type: RecType;
+  user_id: string;
+  account_id: string | null;
+  branch_id: string | null;
+  opportunity_id: string | null;
+  contact_id: string | null;
+  recommended_action: string | null;
+  reason: string | null;
+  score: number | null;
+  model_version: string;
+  prompt_version: string | null;
+  status: RecStatus;
+  shown_at: string;
+  shown_count: number;
+  acted_at: string | null;
+  action_activity_id: string | null;
+  override_note: string | null;
+  outcome: Record<string, unknown> | null;
+};
+
 export type ActivityRow = {
   id: string;
   type: ActivityType;
@@ -313,6 +337,7 @@ export interface Database {
       stage_win_prob: TableDef<StageWinProbRow>;
       opportunity_stage_history: TableDef<OpportunityStageHistoryRow>;
       exogenous_events: TableDef<ExogenousEventRow>;
+      ai_recommendations: TableDef<AiRecommendationRow>;
       audit_log: TableDef<AuditLogRow>;
       targets: TableDef<TargetsRow>;
       app_settings: TableDef<AppSettingsRow>;
