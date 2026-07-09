@@ -1,5 +1,8 @@
 import { Card, SectionTitle } from '@/components/ui';
 import { requireRole } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+import { computeDq } from '@/lib/dq/queries';
+import { fmtPct } from '@/lib/format';
 import { getProfiles, getTargets, getAuditLog, getLastSync } from '@/lib/admin/queries';
 import { updateUser } from './actions';
 import {
@@ -19,11 +22,13 @@ export const maxDuration = 300;
 
 export default async function AdminPage() {
   const { userId } = await requireRole('admin');
-  const [targets, profiles, audit, lastSync] = await Promise.all([
+  const supabase = await createClient();
+  const [targets, profiles, audit, lastSync, dq] = await Promise.all([
     getTargets(),
     getProfiles(),
     getAuditLog(100),
     getLastSync(),
+    computeDq(supabase).catch(() => null),
   ]);
 
   return (
@@ -73,6 +78,84 @@ export default async function AdminPage() {
           </div>
         </details>
       </Card>
+
+      {dq && (
+        <Card className="p-4">
+          <SectionTitle>Data quality</SectionTitle>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-muted text-xs uppercase">Opp completeness</div>
+              <div className="text-charcoal text-xl font-bold tabular-nums">
+                {fmtPct(dq.completeness, 0)}
+              </div>
+              <div className="text-muted text-[11px]">of 7 key fields on active deals</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs uppercase">Touch freshness</div>
+              <div className="text-charcoal text-xl font-bold tabular-nums">
+                {fmtPct(dq.freshness, 0)}
+              </div>
+              <div className="text-muted text-[11px]">accounts inside wiring cadence</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs uppercase">Stalled deals</div>
+              <div
+                className={`text-xl font-bold tabular-nums ${dq.stalled > 0 ? 'text-[var(--color-watch)]' : 'text-charcoal'}`}
+              >
+                {dq.stalled}
+              </div>
+              <div className="text-muted text-[11px]">no future next step</div>
+            </div>
+            <div>
+              <div className="text-muted text-xs uppercase">Gate violations</div>
+              <div
+                className={`text-xl font-bold tabular-nums ${dq.gateViolations > 0 ? 'text-[var(--color-atrisk)]' : 'text-charcoal'}`}
+              >
+                {dq.gateViolations}
+              </div>
+              <div className="text-muted text-[11px]">active deals missing required fields</div>
+            </div>
+          </div>
+          {dq.perRep.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-line text-muted border-b text-left uppercase">
+                    <th className="px-2 py-1.5">Rep</th>
+                    <th className="px-2 py-1.5 text-right">Active opps</th>
+                    <th className="px-2 py-1.5 text-right">Completeness</th>
+                    <th className="px-2 py-1.5 text-right">Freshness</th>
+                    <th className="px-2 py-1.5 text-right">Stalled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dq.perRep.map((r) => (
+                    <tr key={r.repId} className="border-line/60 border-b last:border-0">
+                      <td className="px-2 py-1.5 font-medium">{r.repName}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{r.activeOpps}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {fmtPct(r.completeness, 0)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {fmtPct(r.freshness, 0)}
+                      </td>
+                      <td
+                        className={`px-2 py-1.5 text-right tabular-nums ${r.stalled > 0 ? 'font-semibold text-[var(--color-watch)]' : ''}`}
+                      >
+                        {r.stalled}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-muted mt-2 text-[11px]">
+            Scored, not subjective — definitions in the KPI dictionary. A monthly snapshot is
+            frozen automatically for the before/after record.
+          </p>
+        </Card>
+      )}
 
       <Card className="p-4">
         <SectionTitle>Baseline freeze (measurement)</SectionTitle>

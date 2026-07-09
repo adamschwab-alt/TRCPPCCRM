@@ -31,6 +31,13 @@ export async function GET(request: NextRequest) {
     } catch {
       /* pre-0009 database or transient error — next night catches up */
     }
+    // Nightly DQ snapshot (blueprint Phase 2) — current month, frozen when it closes.
+    try {
+      const { snapshotDq } = await import('@/lib/dq/queries');
+      await snapshotDq(supabase);
+    } catch {
+      /* pre-0010 database — next night catches up */
+    }
     return NextResponse.json({ ok: true, result, outcomesFilled });
   } catch (e) {
     return NextResponse.json(

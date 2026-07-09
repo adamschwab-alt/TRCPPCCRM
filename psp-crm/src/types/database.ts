@@ -248,6 +248,18 @@ export type ExogenousEventRow = {
   created_at: string;
 };
 
+export type DqSnapshotRow = {
+  id: number;
+  period: string; // 'YYYY-MM'
+  completeness: number | null;
+  freshness: number | null;
+  stalled: number;
+  gate_violations: number;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AiRecommendationRow = {
   id: string;
   type: RecType;
@@ -338,6 +350,7 @@ export interface Database {
       opportunity_stage_history: TableDef<OpportunityStageHistoryRow>;
       exogenous_events: TableDef<ExogenousEventRow>;
       ai_recommendations: TableDef<AiRecommendationRow>;
+      dq_snapshots: TableDef<DqSnapshotRow>;
       audit_log: TableDef<AuditLogRow>;
       targets: TableDef<TargetsRow>;
       app_settings: TableDef<AppSettingsRow>;
