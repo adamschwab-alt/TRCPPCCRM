@@ -35,7 +35,7 @@ export async function logActivity(_prev: FormState, formData: FormData): Promise
   });
   if (error) return { error: error.message };
   await logAudit(supabase, 'log', 'activity', parsed.data.account_id, { type: parsed.data.type });
-  revalidatePath('/activities');
+  revalidatePath('/my-day');
   return { ok: true };
 }
 
@@ -64,7 +64,7 @@ export async function addTask(_prev: FormState, formData: FormData): Promise<For
     status: 'open',
   });
   if (error) return { error: error.message };
-  revalidatePath('/activities');
+  revalidatePath('/my-day');
   return { ok: true };
 }
 
@@ -73,5 +73,5 @@ export async function setTaskStatus(id: string, status: 'open' | 'done'): Promis
   const supabase = await createClient();
   await supabase.from('tasks').update({ status }).eq('id', id);
   await logAudit(supabase, status === 'done' ? 'complete' : 'reopen', 'task', id);
-  revalidatePath('/activities');
+  revalidatePath('/my-day');
 }

@@ -1,12 +1,22 @@
 import Link from 'next/link';
-import { KpiTile } from '@/components/ui';
+import { KpiTile, Card, SectionTitle } from '@/components/ui';
 import { requireSession, isStaff } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { getMyDayData, getReps } from '@/lib/myday/queries';
+import {
+  getAccountOptions,
+  getMyTasks,
+  getRecentActivities,
+  type EnrichedTask,
+} from '@/lib/activities/queries';
+import { setTaskStatus } from '../activities/actions';
+import { LogActivityForm, AddTaskForm } from '../activities/ActivityForms';
 import { logNbaShown, type RecRef } from '@/lib/ai/recs';
-import { fmtCurrencyShort } from '@/lib/format';
+import { fmtCurrencyShort, fmtDate } from '@/lib/format';
 import { RepPicker } from './RepPicker';
 import { MyDayTable } from './MyDayTable';
+
+const TYPE_ICON: Record<string, string> = { call: '📞', visit: '🚗', email: '✉️', note: '📝' };
 
 export const dynamic = 'force-dynamic';
 
@@ -22,11 +32,18 @@ export default async function MyDayPage({
   // Reps are locked to their own book; staff can toggle to any rep (or all).
   const repId = staff ? sp.rep || undefined : userId;
 
-  const [data, reps] = await Promise.all([
+  const [data, reps, accountOptions, tasks, recent] = await Promise.all([
     getMyDayData(repId),
     staff ? getReps() : Promise.resolve([]),
+    getAccountOptions(),
+    getMyTasks(userId),
+    getRecentActivities(12),
   ]);
   const { rows, summary, contactsByAccount, callDueAccounts } = data;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const openTasks = tasks.filter((t) => t.status === 'open');
+  const doneTasks = tasks.filter((t) => t.status === 'done').slice(0, 5);
 
   // A rep viewing their own queue = an AI exposure event. Log today's top 10 as
   // next-best-action recommendations (dedup per day) and wire accept/dismiss.
@@ -79,9 +96,9 @@ export default async function MyDayPage({
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
-          label="Cadence overdue"
+          label="Order overdue"
           value={String(summary.overdueCount)}
-          sub={`${fmtCurrencyShort(summary.overdueDollars)} TTM idle past wiring cadence`}
+          sub={`${fmtCurrencyShort(summary.overdueDollars)} TTM with no order past cadence`}
           tone={summary.overdueCount > 0 ? 'warn' : 'neutral'}
         />
         <KpiTile
@@ -125,6 +142,102 @@ export default async function MyDayPage({
         contactsByAccount={contactsByAccount}
         recByBranch={recByBranch}
       />
+
+      {/* Tasks + history (merged from the old Activities page) */}
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-6">
+          <Card className="p-4">
+            <SectionTitle>Log activity</SectionTitle>
+            <p className="text-muted mb-2 text-xs">
+              Account-level note — branch touches log faster from the queue above.
+            </p>
+            <LogActivityForm accounts={accountOptions} />
+          </Card>
+          <Card className="p-4">
+            <SectionTitle>Add task</SectionTitle>
+            <AddTaskForm accounts={accountOptions} />
+          </Card>
+        </div>
+
+        <Card className="p-4">
+          <SectionTitle>My open tasks ({openTasks.length})</SectionTitle>
+          <ul className="space-y-2">
+            {openTasks.map((t) => (
+              <TaskItem key={t.id} t={t} today={today} />
+            ))}
+            {openTasks.length === 0 && <li className="text-muted text-sm">Nothing open. 🎉</li>}
+          </ul>
+          {doneTasks.length > 0 && (
+            <>
+              <div className="text-muted mt-4 mb-2 text-xs font-semibold uppercase">
+                Recently done
+              </div>
+              <ul className="space-y-1">
+                {doneTasks.map((t) => (
+                  <li key={t.id} className="text-muted flex items-center justify-between text-sm">
+                    <span className="line-through">{t.title}</span>
+                    <form action={setTaskStatus.bind(null, t.id, 'open')}>
+                      <button className="text-brand-700 text-xs hover:underline" data-tap>
+                        undo
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Card>
+
+        <Card className="p-4">
+          <SectionTitle>Recent activity</SectionTitle>
+          <ul className="space-y-3">
+            {recent.map((a) => (
+              <li key={a.id} className="border-line/60 border-b pb-3 last:border-0">
+                <div className="flex items-center gap-2 text-sm">
+                  <span>{TYPE_ICON[a.type] ?? '•'}</span>
+                  <span className="text-charcoal font-medium capitalize">{a.type}</span>
+                  {a.account_name && <span className="text-muted">· {a.account_name}</span>}
+                  {a.contact_name && <span className="text-muted">· {a.contact_name}</span>}
+                </div>
+                {a.body && <p className="text-charcoal-2 mt-1 text-sm">{a.body}</p>}
+                <div className="text-muted mt-1 text-xs">
+                  {a.user_name ?? 'Someone'} · {fmtDate(a.occurred_at.slice(0, 10))}
+                </div>
+              </li>
+            ))}
+            {recent.length === 0 && <li className="text-muted text-sm">No activity logged yet.</li>}
+          </ul>
+        </Card>
+      </div>
     </div>
+  );
+}
+
+function TaskItem({ t, today }: { t: EnrichedTask; today: string }) {
+  const overdue = t.due_date && t.due_date < today;
+  return (
+    <li className="bg-canvas flex items-start justify-between gap-2 rounded-md px-3 py-2">
+      <div>
+        <div className="text-charcoal text-sm font-medium">{t.title}</div>
+        <div className="text-muted text-xs">
+          {t.account_name && <span>{t.account_name} · </span>}
+          {t.due_date ? (
+            <span className={overdue ? 'font-semibold text-[var(--color-atrisk)]' : ''}>
+              due {fmtDate(t.due_date)}
+            </span>
+          ) : (
+            'no due date'
+          )}
+        </div>
+      </div>
+      <form action={setTaskStatus.bind(null, t.id, 'done')}>
+        <button
+          className="border-line bg-surface rounded-md border px-2 py-1 text-xs font-medium hover:bg-white"
+          data-tap
+        >
+          Done
+        </button>
+      </form>
+    </li>
   );
 }

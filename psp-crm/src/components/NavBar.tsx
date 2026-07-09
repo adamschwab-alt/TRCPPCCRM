@@ -15,9 +15,7 @@ const NAV: NavItem[] = [
   { href: '/my-day', label: 'My Day' },
   { href: '/accounts', label: 'Accounts' },
   { href: '/coverage', label: 'Coverage' },
-  { href: '/worklists', label: 'Worklists' },
   { href: '/pipeline', label: 'Pipeline' },
-  { href: '/activities', label: 'Activities' },
 ];
 
 export function NavBar({

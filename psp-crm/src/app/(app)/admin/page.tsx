@@ -37,6 +37,96 @@ export default async function AdminPage() {
     <div className="space-y-6">
       <h1 className="text-charcoal text-xl font-bold tracking-tight">Admin</h1>
 
+
+
+
+
+
+
+      <Card className="p-4">
+        <SectionTitle>Data sync (Acumatica OData)</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          {lastSync
+            ? `Last sync: ${new Date(lastSync.created_at).toLocaleString('en-US', { timeZone: 'UTC' })} UTC${
+                lastSync.inserted != null ? ` · +${lastSync.inserted} new rows` : ''
+              }`
+            : 'Never synced yet.'}
+        </p>
+        <SyncForm />
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Import Customer Wiring workbook</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Repeatable template: maintain PSP_Customer_Wiring.xlsx and re-upload anytime — existing
+          contacts are skipped, only new/changed data is written. Tick what to load:{' '}
+          <strong>contacts</strong> (Contact/Email columns on the Branch tab + region roster),{' '}
+          <strong>ratings</strong> (Relationship 1–3 on the Customer Wiring tab), and{' '}
+          <strong>rep assignments</strong> (Assigned Rep column — needs logins whose full names
+          match exactly; unmatched reps are listed). Contact edits made in the app win: a re-upload
+          never overwrites a contact that already exists.
+        </p>
+        <WiringImportForm />
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Add a user</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Creates an account with a temporary password. They set up 2FA on first login.
+        </p>
+        <InviteForm />
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Users ({profiles.length})</SectionTitle>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-line text-muted border-b text-left text-xs uppercase">
+                <th className="px-2 py-2">Name / email</th>
+                <th className="px-2 py-2">Role</th>
+                <th className="px-2 py-2">Active</th>
+                <th className="px-2 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {profiles.map((p) => (
+                <tr key={p.id} className="border-line/60 border-b last:border-0">
+                  <td className="px-2 py-2">
+                    <div className="text-charcoal font-medium">{p.full_name || '—'}</div>
+                    <div className="text-muted text-xs">
+                      {p.email}
+                      {p.id === userId && ' (you)'}
+                    </div>
+                  </td>
+                  <td colSpan={3} className="px-2 py-2">
+                    <form action={updateUser} className="flex flex-wrap items-center gap-2">
+                      <input type="hidden" name="id" value={p.id} />
+                      <select
+                        name="role"
+                        defaultValue={p.role}
+                        className="input max-w-[140px] py-1"
+                      >
+                        <option value="rep">Rep</option>
+                        <option value="manager">Manager</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      <label className="text-charcoal-2 flex items-center gap-1 text-xs">
+                        <input type="checkbox" name="is_active" defaultChecked={p.is_active} />{' '}
+                        active
+                      </label>
+                      <button className="btn-secondary px-3 py-1 text-xs" data-tap>
+                        Save
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
       <Card className="p-4">
         <SectionTitle>Targets &amp; thresholds</SectionTitle>
         <p className="text-muted mb-3 text-xs">
@@ -49,37 +139,7 @@ export default async function AdminPage() {
         )}
       </Card>
 
-      <Card className="p-4">
-        <SectionTitle>Data sync (Acumatica OData)</SectionTitle>
-        <p className="text-muted mb-3 text-xs">
-          {lastSync
-            ? `Last sync: ${new Date(lastSync.created_at).toLocaleString('en-US', { timeZone: 'UTC' })} UTC${
-                lastSync.inserted != null ? ` · +${lastSync.inserted} new rows` : ''
-              }`
-            : 'Never synced yet.'}
-        </p>
-        <SyncForm />
-        <div className="border-line mt-4 border-t pt-4">
-          <h3 className="text-charcoal mb-1 text-sm font-semibold">
-            Fix doubled figures — remove duplicates
-          </h3>
-          <DedupeForm />
-        </div>
-        <div className="border-line mt-4 border-t pt-4">
-          <h3 className="text-charcoal mb-1 text-sm font-semibold">
-            Restore sales data from workbook
-          </h3>
-          <RestoreForm />
-        </div>
-        <details className="border-line mt-4 border-t pt-4">
-          <summary className="text-charcoal cursor-pointer text-sm font-semibold">
-            Advanced: full rebuild from Acumatica
-          </summary>
-          <div className="mt-3">
-            <RebuildForm />
-          </div>
-        </details>
-      </Card>
+      <h2 className="text-charcoal pt-2 text-sm font-bold tracking-wide uppercase">Measurement</h2>
 
       {dq && (
         <Card className="p-4">
@@ -160,17 +220,15 @@ export default async function AdminPage() {
       )}
 
       <Card className="p-4">
-        <SectionTitle>Import Customer Wiring workbook</SectionTitle>
+        <SectionTitle>Baseline freeze (measurement)</SectionTitle>
         <p className="text-muted mb-3 text-xs">
-          Repeatable template: maintain PSP_Customer_Wiring.xlsx and re-upload anytime — existing
-          contacts are skipped, only new/changed data is written. Tick what to load:{' '}
-          <strong>contacts</strong> (Contact/Email columns on the Branch tab + region roster),{' '}
-          <strong>ratings</strong> (Relationship 1–3 on the Customer Wiring tab), and{' '}
-          <strong>rep assignments</strong> (Assigned Rep column — needs logins whose full names
-          match exactly; unmatched reps are listed). Contact edits made in the app win: a re-upload
-          never overwrites a contact that already exists.
+          Downloads a dated snapshot of the entire book — KPIs, every account with its wiring
+          cadence, white-space, and day-0 funnel. Run this ONCE on rollout day and file it: it is
+          the &ldquo;before&rdquo; in every future before/after comparison. Generating it is logged.
         </p>
-        <WiringImportForm />
+        <a href="/export/baseline" className="btn-primary" data-tap>
+          ⬇ Download baseline freeze
+        </a>
       </Card>
 
       <Card className="p-4">
@@ -184,75 +242,25 @@ export default async function AdminPage() {
         <EvidenceForm />
       </Card>
 
-      <Card className="p-4">
-        <SectionTitle>Baseline freeze (measurement)</SectionTitle>
-        <p className="text-muted mb-3 text-xs">
-          Downloads a dated snapshot of the entire book — KPIs, every account with its wiring
-          cadence, white-space, and day-0 funnel. Run this ONCE on rollout day and file it: it is
-          the &ldquo;before&rdquo; in every future before/after comparison. Generating it is logged.
-        </p>
-        <a href="/export/baseline" className="btn-primary" data-tap>
-          ⬇ Download baseline freeze
-        </a>
-      </Card>
-
-      <Card className="p-4">
-        <SectionTitle>Add a user</SectionTitle>
-        <p className="text-muted mb-3 text-xs">
-          Creates an account with a temporary password. They set up 2FA on first login.
-        </p>
-        <InviteForm />
-      </Card>
-
-      <Card className="p-4">
-        <SectionTitle>Users ({profiles.length})</SectionTitle>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-line text-muted border-b text-left text-xs uppercase">
-                <th className="px-2 py-2">Name / email</th>
-                <th className="px-2 py-2">Role</th>
-                <th className="px-2 py-2">Active</th>
-                <th className="px-2 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {profiles.map((p) => (
-                <tr key={p.id} className="border-line/60 border-b last:border-0">
-                  <td className="px-2 py-2">
-                    <div className="text-charcoal font-medium">{p.full_name || '—'}</div>
-                    <div className="text-muted text-xs">
-                      {p.email}
-                      {p.id === userId && ' (you)'}
-                    </div>
-                  </td>
-                  <td colSpan={3} className="px-2 py-2">
-                    <form action={updateUser} className="flex flex-wrap items-center gap-2">
-                      <input type="hidden" name="id" value={p.id} />
-                      <select
-                        name="role"
-                        defaultValue={p.role}
-                        className="input max-w-[140px] py-1"
-                      >
-                        <option value="rep">Rep</option>
-                        <option value="manager">Manager</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                      <label className="text-charcoal-2 flex items-center gap-1 text-xs">
-                        <input type="checkbox" name="is_active" defaultChecked={p.is_active} />{' '}
-                        active
-                      </label>
-                      <button className="btn-secondary px-3 py-1 text-xs" data-tap>
-                        Save
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <details className="border-line bg-surface rounded-lg border p-4">
+        <summary className="text-charcoal cursor-pointer text-sm font-semibold">
+          Data repair (advanced) — one-time recovery tools, rarely needed
+        </summary>
+        <div className="mt-4 space-y-6">
+          <div>
+            <h3 className="text-charcoal mb-1 text-sm font-semibold">Remove duplicate sales rows</h3>
+            <DedupeForm />
+          </div>
+          <div className="border-line border-t pt-4">
+            <h3 className="text-charcoal mb-1 text-sm font-semibold">Restore sales data from workbook</h3>
+            <RestoreForm />
+          </div>
+          <div className="border-line border-t pt-4">
+            <h3 className="text-charcoal mb-1 text-sm font-semibold">Full rebuild from Acumatica</h3>
+            <RebuildForm />
+          </div>
         </div>
-      </Card>
+      </details>
 
       <Card className="p-4">
         <SectionTitle>Audit log</SectionTitle>

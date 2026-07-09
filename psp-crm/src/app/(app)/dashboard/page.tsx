@@ -91,7 +91,7 @@ export default async function DashboardPage() {
         />
         <KpiTile
           label="GRR"
-          href="/worklists?list=at-risk"
+          href="/coverage?rag=at-risk"
           flagship
           value={fmtPct(kpis.grr)}
           tone={tone(kpis.grr, grrTarget, 'gte')}
@@ -128,7 +128,7 @@ export default async function DashboardPage() {
         />
         <KpiTile
           label="Past reorder cadence"
-          href="/worklists?list=cadence"
+          href="/coverage?idle=over"
           value={String(pastCadence)}
           tone={pastCadence > 0 ? 'warn' : 'good'}
           sub={`Branches idle > ${targets?.cadence_days ?? 75}d`}
