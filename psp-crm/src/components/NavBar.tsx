@@ -14,7 +14,6 @@ const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/my-day', label: 'My Day' },
   { href: '/accounts', label: 'Accounts' },
-  { href: '/coverage', label: 'Coverage' },
   { href: '/pipeline', label: 'Pipeline' },
 ];
 
@@ -34,12 +33,7 @@ export function NavBar({
   const staff = role === 'admin' || role === 'manager';
   const items = [
     ...NAV,
-    ...(staff
-      ? [
-          { href: '/call-tracking', label: 'Call Tracking' },
-          { href: '/reports', label: 'Reports' },
-        ]
-      : []),
+    ...(staff ? [{ href: '/call-tracking', label: 'Call Tracking' }] : []),
     ...(role === 'admin' ? [{ href: '/admin', label: 'Admin' }] : []),
   ];
 

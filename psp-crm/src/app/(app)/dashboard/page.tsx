@@ -91,7 +91,7 @@ export default async function DashboardPage() {
         />
         <KpiTile
           label="GRR"
-          href="/coverage?rag=at-risk"
+          href="/accounts?view=branches&rag=at-risk"
           flagship
           value={fmtPct(kpis.grr)}
           tone={tone(kpis.grr, grrTarget, 'gte')}
@@ -128,7 +128,7 @@ export default async function DashboardPage() {
         />
         <KpiTile
           label="Past reorder cadence"
-          href="/coverage?idle=over"
+          href="/accounts?view=branches&idle=over"
           value={String(pastCadence)}
           tone={pastCadence > 0 ? 'warn' : 'good'}
           sub={`Branches idle > ${targets?.cadence_days ?? 75}d`}
@@ -227,13 +227,13 @@ export default async function DashboardPage() {
           <ul className="space-y-3 text-sm">
             <WsRow
               label="Aluminum-only (no steel)"
-              href="/coverage?ws=steel-gap"
+              href="/accounts?view=branches&ws=steel-gap"
               count={steelGap?.branch_count}
               value={steelGap?.ttm_revenue}
             />
             <WsRow
               label="Steel-only (no aluminum)"
-              href="/coverage?ws=alu-gap"
+              href="/accounts?view=branches&ws=alu-gap"
               count={aluGap?.branch_count}
               value={aluGap?.ttm_revenue}
             />

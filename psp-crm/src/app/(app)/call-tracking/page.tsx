@@ -5,13 +5,57 @@ import { getActivityData } from '@/lib/activity/queries';
 import { getRecentActivities } from '@/lib/activities/queries';
 import { fmtCurrencyShort, fmtPct, fmtDeltaPct, fmtDate } from '@/lib/format';
 import { CallCoverageTable } from './CallCoverageTable';
+import { ReportsSection } from './ReportsSection';
 
 export const dynamic = 'force-dynamic';
 
 const REP_COLORS = ['#b45f2f', '#3f6f5a', '#5a6b8c', '#8c5a7d', '#7d7d46', '#46707d', '#a04848'];
 
-export default async function CallTrackingPage() {
+function Tabs({ active }: { active: 'activity' | 'reports' }) {
+  const pill = (on: boolean) =>
+    `rounded-full px-3 py-1.5 text-sm font-medium ${
+      on ? 'bg-brand text-white' : 'border-line bg-surface text-charcoal-2 hover:bg-canvas border'
+    }`;
+  return (
+    <div className="mt-4 flex gap-2">
+      <Link href="/call-tracking" className={pill(active === 'activity')} data-tap>
+        Call tracking
+      </Link>
+      <Link href="/call-tracking?tab=reports" className={pill(active === 'reports')} data-tap>
+        Reports
+      </Link>
+    </div>
+  );
+}
+
+export default async function CallTrackingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   await requireRole('admin', 'manager');
+  const sp = await searchParams;
+
+  if (sp.tab === 'reports') {
+    return (
+      <div>
+        <div>
+          <h1 className="text-charcoal text-xl font-bold tracking-tight">
+            Activity &amp; Call Tracking
+          </h1>
+          <p className="text-muted text-sm">
+            Forecast accuracy · AI adoption · data-quality history — the measurement record behind
+            the case study.
+          </p>
+        </div>
+        <Tabs active="reports" />
+        <div className="mt-5">
+          <ReportsSection />
+        </div>
+      </div>
+    );
+  }
+
   const [data, recent] = await Promise.all([getActivityData(), getRecentActivities(15)]);
   const { rows, scorecard, series, kpis } = data;
   const maxWeek = Math.max(1, ...series.weeks.map((_, i) => series.reps.reduce((s, r) => s + r.counts[i], 0)));
@@ -37,6 +81,7 @@ export default async function CallTrackingPage() {
           </a>
         </div>
       </div>
+      <Tabs active="activity" />
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiTile
