@@ -184,6 +184,8 @@ export default async function ReportsPage() {
       <Card className="p-4">
         <SectionTitle>Report exports</SectionTitle>
         <div className="flex flex-wrap gap-2">
+          <a href="/export/snapshot-pack" className="btn-primary" data-tap>⬇ Monthly snapshot pack</a>
+          <a href="/export/roi-bridge" className="btn-secondary" data-tap>⬇ ROI bridge template</a>
           <a href="/export/call-coverage" className="btn-secondary" data-tap>⬇ Call coverage</a>
           <a href="/export/touches" className="btn-secondary" data-tap>⬇ Touch log</a>
           <a href="/export/pipeline" className="btn-secondary" data-tap>⬇ Pipeline</a>
@@ -194,7 +196,10 @@ export default async function ReportsPage() {
         </div>
         <p className="text-muted mt-2 text-[11px]">
           All exports respect role scoping and reflect live data at download time — except the
-          baseline freeze, which is the permanent &ldquo;before&rdquo; record.
+          baseline freeze, the permanent &ldquo;before&rdquo; record. Download the{' '}
+          <strong>monthly snapshot pack at each month end</strong> and file it with the baseline:
+          that sequence is the case-study dataset. Deal journeys export from any opportunity&rsquo;s
+          edit page.
         </p>
       </Card>
     </div>

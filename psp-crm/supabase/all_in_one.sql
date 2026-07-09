@@ -983,3 +983,17 @@ drop policy if exists forecast_snapshots_select on forecast_snapshots;
 create policy forecast_snapshots_select on forecast_snapshots
   for select to authenticated using (is_staff() or rep_id = auth.uid());
 -- Writes only via the service role (nightly job).
+
+
+-- ╔═══ supabase/migrations/0012_case_study.sql ═══╗
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 0012 Case-study evidence (blueprint Phase 5)
+-- exogenous_events doubles as the contemporaneous evidence log: market shocks
+-- (footnotes for charts) AND dated testimonials (quotes captured when said,
+-- not reconstructed later). A `kind` discriminator keeps them queryable apart.
+-- ════════════════════════════════════════════════════════════════════════════
+
+alter table exogenous_events
+  add column if not exists kind text not null default 'market'
+  check (kind in ('market', 'testimonial'));

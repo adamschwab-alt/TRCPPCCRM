@@ -23,7 +23,12 @@ export default async function EditOpportunityPage({ params }: { params: Promise<
       <Link href="/pipeline" className="text-brand-700 text-sm hover:underline">
         ← Pipeline
       </Link>
-      <h1 className="text-charcoal mt-2 text-xl font-bold tracking-tight">Edit opportunity</h1>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-charcoal text-xl font-bold tracking-tight">Edit opportunity</h1>
+        <a href={`/export/deal-journey?opp=${id}`} className="btn-secondary text-xs" data-tap>
+          ⬇ Deal journey
+        </a>
+      </div>
       <OpportunityForm
         action={update}
         accounts={accounts}

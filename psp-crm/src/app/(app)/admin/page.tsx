@@ -12,6 +12,7 @@ import {
   RebuildForm,
   DedupeForm,
   RestoreForm,
+  EvidenceForm,
 } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
@@ -156,6 +157,17 @@ export default async function AdminPage() {
           </p>
         </Card>
       )}
+
+      <Card className="p-4">
+        <SectionTitle>Case-study evidence log</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Two kinds of contemporaneous evidence: <strong>market events</strong> (price changes,
+          competitor moves — they become footnotes on before/after charts so results are honest)
+          and <strong>testimonials</strong> (a rep or manager says something good — capture the
+          quote WITH its date; dated quotes are credible, remembered ones aren&rsquo;t).
+        </p>
+        <EvidenceForm />
+      </Card>
 
       <Card className="p-4">
         <SectionTitle>Baseline freeze (measurement)</SectionTitle>

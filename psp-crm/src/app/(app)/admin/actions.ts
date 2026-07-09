@@ -217,6 +217,43 @@ async function dedupeViaApi(): Promise<number> {
   return dupeIds.length;
 }
 
+const eventSchema = z.object({
+  kind: z.enum(['market', 'testimonial']),
+  event_date: z.string().min(8, 'Pick a date'),
+  title: z.string().min(3, 'Add the event / quote'),
+  note: z.preprocess((v) => (v === '' ? null : v), z.string().nullable()),
+});
+
+/**
+ * Case-study evidence log: market shocks (chart footnotes) and dated
+ * testimonials — captured contemporaneously, which is what makes them credible.
+ */
+export async function addEvidence(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { userId } = await requireRole('admin');
+  const parsed = eventSchema.safeParse({
+    kind: formData.get('kind'),
+    event_date: formData.get('event_date'),
+    title: formData.get('title'),
+    note: formData.get('note'),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from('exogenous_events').insert({
+    ...parsed.data,
+    created_by: userId,
+  });
+  if (error) {
+    return {
+      error: /relation .* does not exist|column .* does not exist/i.test(error.message)
+        ? 'Run migration 0012 in Supabase first.'
+        : error.message,
+    };
+  }
+  revalidatePath('/admin');
+  return { ok: true, message: parsed.data.kind === 'testimonial' ? 'Testimonial logged.' : 'Market event logged.' };
+}
+
 const num = (v: unknown) => z.coerce.number().parse(v);
 
 const targetsSchema = z.object({

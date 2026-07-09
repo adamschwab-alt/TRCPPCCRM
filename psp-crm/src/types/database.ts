@@ -244,6 +244,7 @@ export type ExogenousEventRow = {
   event_date: string;
   title: string;
   note: string | null;
+  kind: string; // 'market' | 'testimonial'
   created_by: string | null;
   created_at: string;
 };

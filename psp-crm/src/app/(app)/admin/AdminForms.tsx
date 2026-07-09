@@ -8,6 +8,7 @@ import {
   rebuildData,
   dedupeData,
   restoreFromWorkbook,
+  addEvidence,
   type FormState,
 } from './actions';
 import type { TargetsRow } from '@/types/database';
@@ -28,6 +29,46 @@ export function SyncForm() {
       )}
       <button type="submit" disabled={pending} className="btn-primary" data-tap>
         {pending ? 'Syncing…' : 'Sync now'}
+      </button>
+    </form>
+  );
+}
+
+export function EvidenceForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(addEvidence, {});
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">Type</span>
+          <select name="kind" className="input" defaultValue="market">
+            <option value="market">Market event (chart footnote)</option>
+            <option value="testimonial">Testimonial (dated quote)</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">Date</span>
+          <input name="event_date" type="date" className="input" />
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-charcoal-2 mb-1 block text-xs font-medium">
+          Event / quote
+        </span>
+        <input
+          name="title"
+          className="input"
+          placeholder='e.g. "Steel price increase announced" or "My Day tells me exactly who to call — Brandon"'
+        />
+      </label>
+      <label className="block">
+        <span className="text-charcoal-2 mb-1 block text-xs font-medium">Detail (optional)</span>
+        <input name="note" className="input" placeholder="Context, attribution, expected impact…" />
+      </label>
+      {state.error && <p className="text-sm text-[var(--color-atrisk)]">{state.error}</p>}
+      {state.ok && <p className="text-sm text-[var(--color-ontrack)]">{state.message}</p>}
+      <button type="submit" disabled={pending} className="btn-secondary" data-tap>
+        {pending ? 'Logging…' : 'Log evidence'}
       </button>
     </form>
   );
