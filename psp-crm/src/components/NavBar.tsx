@@ -33,7 +33,12 @@ export function NavBar({
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const items = role === 'admin' ? [...NAV, { href: '/admin', label: 'Admin' }] : NAV;
+  const staff = role === 'admin' || role === 'manager';
+  const items = [
+    ...NAV,
+    ...(staff ? [{ href: '/call-tracking', label: 'Call Tracking' }] : []),
+    ...(role === 'admin' ? [{ href: '/admin', label: 'Admin' }] : []),
+  ];
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 

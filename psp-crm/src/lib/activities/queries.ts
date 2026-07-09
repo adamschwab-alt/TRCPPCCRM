@@ -25,18 +25,22 @@ async function nameMaps() {
 export type EnrichedActivity = ActivityRow & {
   account_name: string | null;
   user_name: string | null;
+  contact_name: string | null;
 };
 
 export async function getRecentActivities(limit = 50): Promise<EnrichedActivity[]> {
   const supabase = await createClient();
-  const [{ data }, maps] = await Promise.all([
+  const [{ data }, maps, contactsRes] = await Promise.all([
     supabase.from('activities').select('*').order('occurred_at', { ascending: false }).limit(limit),
     nameMaps(),
+    supabase.from('contacts').select('id,name'), // tolerated pre-0007 (empty on error)
   ]);
+  const cName = new Map((contactsRes.data ?? []).map((c) => [c.id, c.name]));
   return (data ?? []).map((a) => ({
     ...a,
     account_name: a.account_id ? (maps.aName.get(a.account_id) ?? null) : null,
     user_name: a.user_id ? (maps.pName.get(a.user_id) ?? null) : null,
+    contact_name: a.contact_id ? (cName.get(a.contact_id) ?? null) : null,
   }));
 }
 

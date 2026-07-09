@@ -1,9 +1,10 @@
-import { KpiTile, Card, SectionTitle } from '@/components/ui';
+import Link from 'next/link';
+import { KpiTile } from '@/components/ui';
 import { requireSession, isStaff } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
-import { getMyDayData, getReps, getScorecard, type ScorecardRow } from '@/lib/myday/queries';
+import { getMyDayData, getReps } from '@/lib/myday/queries';
 import { logNbaShown, type RecRef } from '@/lib/ai/recs';
-import { fmtCurrencyShort, fmtPct, fmtDeltaPct } from '@/lib/format';
+import { fmtCurrencyShort } from '@/lib/format';
 import { RepPicker } from './RepPicker';
 import { MyDayTable } from './MyDayTable';
 
@@ -21,12 +22,11 @@ export default async function MyDayPage({
   // Reps are locked to their own book; staff can toggle to any rep (or all).
   const repId = staff ? sp.rep || undefined : userId;
 
-  const [data, reps, scorecard] = await Promise.all([
+  const [data, reps] = await Promise.all([
     getMyDayData(repId),
     staff ? getReps() : Promise.resolve([]),
-    staff ? getScorecard() : Promise.resolve([] as ScorecardRow[]),
   ]);
-  const { rows, summary, contactsByAccount } = data;
+  const { rows, summary, contactsByAccount, callDueAccounts } = data;
 
   // A rep viewing their own queue = an AI exposure event. Log today's top 10 as
   // next-best-action recommendations (dedup per day) and wire accept/dismiss.
@@ -96,84 +96,21 @@ export default async function MyDayPage({
           sub={`${fmtCurrencyShort(summary.whitespaceDollars)} in-line base`}
         />
         <KpiTile
-          label="Needs a touch"
-          value={String(summary.needsTouchCount)}
-          sub="no contact in 30d+"
+          label="Call due now"
+          value={String(callDueAccounts)}
+          sub="accounts past their wiring call cadence"
+          tone={callDueAccounts > 0 ? 'warn' : 'good'}
         />
       </div>
 
-      {staff && !repId && scorecard.length > 0 && (
-        <div className="mt-6">
-          <SectionTitle>Rep scorecard — plan vs. actual (wiring cadence)</SectionTitle>
-          <Card className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-line text-muted border-b text-left text-xs uppercase">
-                  <th className="px-3 py-2">Rep</th>
-                  <th className="px-3 py-2 text-right">Accounts</th>
-                  <th className="px-3 py-2 text-right">TTM</th>
-                  <th className="px-3 py-2 text-right">YoY</th>
-                  <th className="px-3 py-2 text-right">Plan / wk</th>
-                  <th className="px-3 py-2 text-right">Actual / wk</th>
-                  <th className="px-3 py-2 text-right">Coverage 90d</th>
-                  <th className="px-3 py-2 text-right">Overdue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scorecard.map((r) => (
-                  <tr key={r.repId} className="border-line/60 border-b last:border-0">
-                    <td className="px-3 py-2">
-                      <a
-                        href={`/my-day?rep=${r.repId}`}
-                        className="text-brand-700 font-medium hover:underline"
-                      >
-                        {r.repName}
-                      </a>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.accounts}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {fmtCurrencyShort(r.ttmRevenue)}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right tabular-nums ${
-                        (r.growthPct ?? 0) < 0
-                          ? 'text-[var(--color-atrisk)]'
-                          : 'text-[var(--color-ontrack)]'
-                      }`}
-                    >
-                      {fmtDeltaPct(r.growthPct)}
-                    </td>
-                    <td className="text-muted px-3 py-2 text-right tabular-nums">
-                      {r.weeklyPlan.toFixed(1)}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right font-semibold tabular-nums ${
-                        r.weeklyActual >= r.weeklyPlan
-                          ? 'text-[var(--color-ontrack)]'
-                          : 'text-[var(--color-watch)]'
-                      }`}
-                    >
-                      {r.weeklyActual.toFixed(1)}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.coveragePct, 0)}</td>
-                    <td
-                      className={`px-3 py-2 text-right tabular-nums ${
-                        r.overdue > 0 ? 'font-semibold text-[var(--color-watch)]' : 'text-muted'
-                      }`}
-                    >
-                      {r.overdue}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-          <p className="text-muted mt-2 text-xs">
-            Plan = each account&rsquo;s wiring cadence (size × relationship → touches/yr) summed
-            over the rep&rsquo;s book, per week. Actual = touches logged in the last 30 days.
-            Coverage = share of accounts touched in the last 90 days.
-          </p>
-        </div>
+      {staff && (
+        <p className="text-muted mt-4 text-xs">
+          Rep scorecard, touches-per-week, and call-coverage exports live on{' '}
+          <Link href="/call-tracking" className="text-brand-700 hover:underline">
+            Activity &amp; Call Tracking
+          </Link>
+          .
+        </p>
       )}
 
       <p className="text-muted mt-4 mb-3 text-xs">

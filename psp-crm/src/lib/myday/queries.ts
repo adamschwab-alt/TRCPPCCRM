@@ -24,10 +24,14 @@ export async function getReps(): Promise<RepOption[]> {
     .map((p) => ({ id: p.id, name: p.full_name || p.email, role: p.role }));
 }
 
+export type CallDue = { status: 'never' | 'due' | 'ok'; dueIn: number | null };
+
 export type MyDayRow = ScoredBranch & {
   account_name: string | null;
   owner_name: string | null;
   wiring: Wiring | null;
+  /** account-grain "time to call": TOUCH recency vs the wiring cadence */
+  callDue: CallDue | null;
 };
 
 export type ContactOption = Pick<ContactRow, 'id' | 'name' | 'title' | 'tier'>;
@@ -38,6 +42,8 @@ export type MyDayData = {
   cadence: number; // legacy fallback (targets.cadence_days) — used when wiring can't be computed
   /** account_id → contacts, for the touch form's "who did you talk to" picker */
   contactsByAccount: Record<string, ContactOption[]>;
+  /** distinct accounts on this list overdue (or never touched) per wiring cadence */
+  callDueAccounts: number;
 };
 
 type AccountLite = {
@@ -93,20 +99,34 @@ export async function getMyDayData(repId?: string): Promise<MyDayData> {
 
   const scoped = repId ? branches.filter((b) => effectiveOwner(b) === repId) : branches;
 
-  // Last touch per branch (RLS-scoped: a rep sees their own touches).
+  // Last touch per branch AND per account (RLS-scoped: a rep sees their own).
   const touches = new Map<string, TouchSummary>();
+  const accountLastTouch = new Map<string, string>();
   if (scoped.length > 0) {
     const { data: activities } = await supabase
       .from('activities')
-      .select('branch_id,type,occurred_at')
-      .not('branch_id', 'is', null)
+      .select('branch_id,account_id,type,occurred_at')
       .order('occurred_at', { ascending: false })
       .limit(2000);
     for (const a of activities ?? []) {
-      if (!a.branch_id || touches.has(a.branch_id)) continue; // first = most recent
-      touches.set(a.branch_id, { lastTouchAt: a.occurred_at, lastTouchType: a.type });
+      if (a.branch_id && !touches.has(a.branch_id))
+        touches.set(a.branch_id, { lastTouchAt: a.occurred_at, lastTouchType: a.type });
+      if (a.account_id && !accountLastTouch.has(a.account_id))
+        accountLastTouch.set(a.account_id, a.occurred_at);
     }
   }
+
+  // "Time to call" (touch recency vs wiring cadence) at account grain.
+  const nowMs = Date.now();
+  const callDueOf = (accountId: string): CallDue | null => {
+    const w = wiringOf(accountId);
+    if (w.intervalDays == null) return null; // no proactive cadence
+    const last = accountLastTouch.get(accountId);
+    if (!last) return { status: 'never', dueIn: 0 };
+    const daysSince = Math.floor((nowMs - new Date(last).getTime()) / 86_400_000);
+    const dueIn = w.intervalDays - daysSince;
+    return { status: dueIn < 0 ? 'due' : 'ok', dueIn };
+  };
 
   const now = Date.now();
   const scored = buildWorklist(
@@ -128,7 +148,14 @@ export async function getMyDayData(repId?: string): Promise<MyDayData> {
       return oid ? (ownerName.get(oid) ?? null) : null;
     })(),
     wiring: wiringOf(s.branch.account_id),
+    callDue: callDueOf(s.branch.account_id),
   }));
+
+  const callDueAccounts = new Set(
+    rows
+      .filter((r) => r.callDue && r.callDue.status !== 'ok')
+      .map((r) => r.branch.account_id),
+  ).size;
 
   // Contacts for the accounts on the list (tolerates the table not existing yet).
   const contactsByAccount: Record<string, ContactOption[]> = {};
@@ -149,102 +176,11 @@ export async function getMyDayData(repId?: string): Promise<MyDayData> {
     }
   }
 
-  return { rows, summary: summarize(scored), cadence: fallbackCadence, contactsByAccount };
-}
-
-// ── Rep scorecard (manager view) ─────────────────────────────────────────────
-
-export type ScorecardRow = {
-  repId: string;
-  repName: string;
-  accounts: number;
-  ttmRevenue: number;
-  growthPct: number | null;
-  plannedPerYear: number; // Σ wiring calls/yr across owned accounts
-  touches30d: number;
-  weeklyPlan: number; // plannedPerYear / 52
-  weeklyActual: number; // touches30d / (30/7)
-  coveragePct: number | null; // owned accounts touched in last 90d
-  overdue: number; // branches past wiring cadence
-};
-
-/** Manager scorecard: plan-vs-actual touch activity per rep over their book. */
-export async function getScorecard(): Promise<ScorecardRow[]> {
-  const supabase = await createClient();
-  const [{ data: accounts }, { data: accountMetrics }, { data: branchRows }, { data: profiles }] =
-    await Promise.all([
-      supabase.from('accounts').select('*'),
-      supabase.from('account_metrics').select('account_id,ttm_revenue,prior_revenue'),
-      supabase.from('branch_metrics').select('*'),
-      supabase.from('profiles').select('id,full_name,email,role,is_active'),
-    ]);
-
-  const since90 = new Date(Date.now() - 90 * 86_400_000).toISOString();
-  const since30 = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const { data: recentTouches } = await supabase
-    .from('activities')
-    .select('user_id,account_id,occurred_at')
-    .gte('occurred_at', since90)
-    .limit(5000);
-
-  const accts = (accounts ?? []) as AccountLite[];
-  const metric = new Map(
-    (
-      (accountMetrics ?? []) as Pick<
-        AccountMetricsRow,
-        'account_id' | 'ttm_revenue' | 'prior_revenue'
-      >[]
-    ).map((m) => [m.account_id, m]),
-  );
-  const accountOwner = new Map(accts.map((a) => [a.id, a.owner_id]));
-  const branches = (branchRows ?? []) as BranchMetricsRow[];
-
-  const rows: ScorecardRow[] = [];
-  for (const p of (profiles ?? []).filter((x) => x.is_active)) {
-    const owned = accts.filter((a) => a.owner_id === p.id);
-    if (owned.length === 0) continue;
-
-    let ttm = 0;
-    let prior = 0;
-    let planned = 0;
-    const ownedIds = new Set(owned.map((a) => a.id));
-    for (const a of owned) {
-      const m = metric.get(a.id);
-      ttm += m?.ttm_revenue ?? 0;
-      prior += m?.prior_revenue ?? 0;
-      planned += wiringFor(m?.ttm_revenue ?? 0, a.relationship_rating).callsPerYear;
-    }
-
-    const touched90 = new Set<string>();
-    let touches30 = 0;
-    for (const t of recentTouches ?? []) {
-      if (t.user_id !== p.id) continue;
-      if (t.account_id && ownedIds.has(t.account_id)) touched90.add(t.account_id);
-      if (t.occurred_at >= since30) touches30++;
-    }
-
-    const overdue = branches.filter((b) => {
-      const owner = b.owner_id ?? accountOwner.get(b.account_id) ?? null;
-      if (owner !== p.id) return false;
-      const m = metric.get(b.account_id);
-      const a = owned.find((x) => x.id === b.account_id);
-      const iv = wiringFor(m?.ttm_revenue ?? 0, a?.relationship_rating).intervalDays;
-      return iv != null && b.days_idle != null && b.days_idle > iv;
-    }).length;
-
-    rows.push({
-      repId: p.id,
-      repName: p.full_name || p.email,
-      accounts: owned.length,
-      ttmRevenue: ttm,
-      growthPct: prior > 0 ? ttm / prior - 1 : null,
-      plannedPerYear: planned,
-      touches30d: touches30,
-      weeklyPlan: planned / 52,
-      weeklyActual: touches30 / (30 / 7),
-      coveragePct: owned.length > 0 ? touched90.size / owned.length : null,
-      overdue,
-    });
-  }
-  return rows.sort((a, b) => b.ttmRevenue - a.ttmRevenue);
+  return {
+    rows,
+    summary: summarize(scored),
+    cadence: fallbackCadence,
+    contactsByAccount,
+    callDueAccounts,
+  };
 }

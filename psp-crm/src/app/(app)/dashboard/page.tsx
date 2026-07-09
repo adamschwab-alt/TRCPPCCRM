@@ -8,6 +8,7 @@ import {
   getTopContractingAccounts,
   getWhitespaceSummary,
   getPastCadenceCount,
+  getPipelineKpis,
 } from '@/lib/metrics/queries';
 import { fmtCurrencyShort, fmtPct, fmtDeltaPct, fmtCurrency, fmtMonthYear } from '@/lib/format';
 
@@ -47,10 +48,11 @@ export default async function DashboardPage() {
     );
   }
 
-  const [leak, whitespace, pastCadence] = await Promise.all([
+  const [leak, whitespace, pastCadence, pipeline] = await Promise.all([
     getTopContractingAccounts(8),
     getWhitespaceSummary(),
     getPastCadenceCount(targets?.cadence_days ?? 75),
+    getPipelineKpis(targets?.new_biz_target ?? 10_000_000),
   ]);
 
   const grrTarget = targets?.grr_target ?? 0.88;
@@ -130,6 +132,45 @@ export default async function DashboardPage() {
           value={String(pastCadence)}
           tone={pastCadence > 0 ? 'warn' : 'good'}
           sub={`Branches idle > ${targets?.cadence_days ?? 75}d`}
+        />
+      </div>
+
+      {/* Sales pipeline */}
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiTile
+          label="Open pipeline"
+          href="/pipeline"
+          value={fmtCurrencyShort(pipeline.openAmount)}
+          sub={`${pipeline.openCount} open opportunities`}
+        />
+        <KpiTile
+          label="Weighted pipeline"
+          href="/pipeline"
+          value={fmtCurrencyShort(pipeline.weightedAmount)}
+          sub={
+            pipeline.coverage != null
+              ? `${pipeline.coverage.toFixed(1)}× quarterly new-biz target`
+              : 'coverage n/m'
+          }
+          tone={
+            pipeline.coverage == null
+              ? 'neutral'
+              : pipeline.coverage >= (targets?.pipeline_coverage_target ?? 1.5)
+                ? 'good'
+                : 'warn'
+          }
+        />
+        <KpiTile
+          label="Pipeline created (90d)"
+          href="/pipeline"
+          value={fmtCurrencyShort(pipeline.created90)}
+          sub="new opportunities entered"
+        />
+        <KpiTile
+          label="Win rate (12mo)"
+          href="/pipeline"
+          value={pipeline.winRate != null ? fmtPct(pipeline.winRate, 0) : 'n/m'}
+          sub={pipeline.winRate != null ? 'of closed deals' : 'no closed deals yet'}
         />
       </div>
 

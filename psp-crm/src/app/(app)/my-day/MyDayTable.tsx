@@ -149,6 +149,21 @@ function WorkCard({
                 {row.wiring.size}×{row.wiring.rating} · every {row.wiring.intervalDays}d
               </span>
             )}
+            {row.callDue?.status === 'never' && (
+              <span className="rounded-full bg-[var(--color-atrisk-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-atrisk)]">
+                Never touched
+              </span>
+            )}
+            {row.callDue?.status === 'due' && (
+              <span className="rounded-full bg-[var(--color-watch-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-watch)]">
+                Call due · {Math.abs(row.callDue.dueIn ?? 0)}d over
+              </span>
+            )}
+            {row.callDue?.status === 'ok' && (
+              <span className="rounded-full bg-[var(--color-ontrack-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-ontrack)]">
+                next call in {row.callDue.dueIn}d
+              </span>
+            )}
           </div>
         </div>
 

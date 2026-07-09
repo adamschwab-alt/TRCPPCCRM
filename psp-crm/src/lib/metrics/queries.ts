@@ -100,6 +100,51 @@ export async function getBranch(branchId: string): Promise<BranchMetricsRow | nu
   return data;
 }
 
+export type PipelineKpis = {
+  openCount: number;
+  openAmount: number;
+  weightedAmount: number;
+  coverage: number | null; // weighted ÷ quarterly new-biz target
+  created90: number; // $ pipeline created in last 90 days
+  winRate: number | null; // Won ÷ (Won+Lost) closed in last 365d
+};
+
+/** Pipeline KPIs for the dashboard tiles. */
+export async function getPipelineKpis(newBizTarget: number): Promise<PipelineKpis> {
+  const supabase = await createClient();
+  const { data: opps } = await supabase
+    .from('opportunities')
+    .select('stage,amount,weighted_amount,created_at,closed_at');
+  const all = opps ?? [];
+  const open = all.filter((o) => o.stage !== 'Won' && o.stage !== 'Lost');
+  const openAmount = open.reduce((s, o) => s + (o.amount ?? 0), 0);
+  const weightedAmount = open.reduce((s, o) => s + (o.weighted_amount ?? 0), 0);
+  const quarterTarget = newBizTarget / 4;
+
+  const d90 = new Date(Date.now() - 90 * 86_400_000).toISOString();
+  const created90 = all
+    .filter((o) => o.created_at >= d90)
+    .reduce((s, o) => s + (o.amount ?? 0), 0);
+
+  const d365 = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  const closed = all.filter(
+    (o) =>
+      (o.stage === 'Won' || o.stage === 'Lost') &&
+      (o as { closed_at?: string | null }).closed_at != null &&
+      (o as { closed_at?: string | null }).closed_at! >= d365,
+  );
+  const won = closed.filter((o) => o.stage === 'Won').length;
+
+  return {
+    openCount: open.length,
+    openAmount,
+    weightedAmount,
+    coverage: quarterTarget > 0 ? weightedAmount / quarterTarget : null,
+    created90,
+    winRate: closed.length > 0 ? won / closed.length : null,
+  };
+}
+
 export async function getBranchTransactions(
   branchId: string,
   limit = 100,
