@@ -228,6 +228,14 @@ export async function importWiring(_prev: FormState, formData: FormData): Promis
   if (!(file instanceof File) || file.size === 0) {
     return { error: 'Choose the Customer Wiring workbook (.xlsx) first.' };
   }
+  const opts = {
+    contacts: formData.get('do_contacts') === 'on',
+    ratings: formData.get('do_ratings') === 'on',
+    owners: formData.get('do_owners') === 'on',
+  };
+  if (!opts.contacts && !opts.ratings && !opts.owners) {
+    return { error: 'Tick at least one thing to import.' };
+  }
   const supabase = await createClient();
   try {
     const { parseWiringWorkbook, runWiringImport } = await import('@/lib/import/wiring-import');
@@ -238,22 +246,25 @@ export async function importWiring(_prev: FormState, formData: FormData): Promis
           'No wiring data found — is this the Customer Wiring workbook (with the "Customer Wiring - Branch" tab)?',
       };
     }
-    const s = await runWiringImport(supabase, parsed);
+    const s = await runWiringImport(supabase, parsed, opts);
     await logAudit(supabase, 'import', 'wiring_workbook', null, {
       ratings: s.ratingsUpdated,
       owners: s.branchOwnersSet,
       contacts: s.contactsCreated,
     });
     revalidatePath('/', 'layout');
-    const parts = [
-      `${s.ratingsUpdated} rating${s.ratingsUpdated === 1 ? '' : 's'} updated`,
-      `${s.branchOwnersSet} branch owner${s.branchOwnersSet === 1 ? '' : 's'} set`,
-      `${s.accountOwnersSet} account owner${s.accountOwnersSet === 1 ? '' : 's'} filled`,
-      `${s.contactsCreated} contact${s.contactsCreated === 1 ? '' : 's'} added`,
-      `${s.contactsSkipped} already present`,
-    ];
+    const parts: string[] = [];
+    if (opts.ratings) parts.push(`${s.ratingsUpdated} rating${s.ratingsUpdated === 1 ? '' : 's'} updated`);
+    if (opts.owners) {
+      parts.push(`${s.branchOwnersSet} branch owner${s.branchOwnersSet === 1 ? '' : 's'} set`);
+      parts.push(`${s.accountOwnersSet} account owner${s.accountOwnersSet === 1 ? '' : 's'} filled`);
+    }
+    if (opts.contacts) {
+      parts.push(`${s.contactsCreated} contact${s.contactsCreated === 1 ? '' : 's'} added`);
+      parts.push(`${s.contactsSkipped} already present (skipped)`);
+    }
     const warnings: string[] = [];
-    if (s.unmatchedReps.length > 0)
+    if (opts.owners && s.unmatchedReps.length > 0)
       warnings.push(
         `No login found for: ${s.unmatchedReps.join(', ')} — create these users (exact full name), then re-run this import to assign their books.`,
       );

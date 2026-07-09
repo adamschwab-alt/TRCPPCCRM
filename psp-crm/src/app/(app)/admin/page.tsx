@@ -162,12 +162,13 @@ export default async function AdminPage() {
       <Card className="p-4">
         <SectionTitle>Import Customer Wiring workbook</SectionTitle>
         <p className="text-muted mb-3 text-xs">
-          Bulk-loads from PSP_Customer_Wiring.xlsx: <strong>relationship ratings</strong> (Customer
-          Wiring tab), <strong>rep assignments</strong> and <strong>customer contacts</strong>{' '}
-          (Customer Wiring — Branch tab, Contact/Email columns), and region roster contacts. Safe
-          to re-run — existing contacts are skipped and only changes are written. Rep assignment
-          needs a login whose full name matches the workbook&rsquo;s &ldquo;Assigned Rep&rdquo;
-          exactly; unmatched reps are listed so you can add them and re-run.
+          Repeatable template: maintain PSP_Customer_Wiring.xlsx and re-upload anytime — existing
+          contacts are skipped, only new/changed data is written. Tick what to load:{' '}
+          <strong>contacts</strong> (Contact/Email columns on the Branch tab + region roster),{' '}
+          <strong>ratings</strong> (Relationship 1–3 on the Customer Wiring tab), and{' '}
+          <strong>rep assignments</strong> (Assigned Rep column — needs logins whose full names
+          match exactly; unmatched reps are listed). Contact edits made in the app win: a re-upload
+          never overwrites a contact that already exists.
         </p>
         <WiringImportForm />
       </Card>

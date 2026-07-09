@@ -45,6 +45,17 @@ export function WiringImportForm() {
         accept=".xlsx,.xls"
         className="border-line block w-full rounded-md border p-2 text-sm"
       />
+      <div className="flex flex-wrap gap-4">
+        <label className="text-charcoal-2 flex items-center gap-1.5 text-sm">
+          <input type="checkbox" name="do_contacts" defaultChecked /> Customer contacts
+        </label>
+        <label className="text-charcoal-2 flex items-center gap-1.5 text-sm">
+          <input type="checkbox" name="do_ratings" /> Relationship ratings
+        </label>
+        <label className="text-charcoal-2 flex items-center gap-1.5 text-sm">
+          <input type="checkbox" name="do_owners" /> Rep assignments (needs logins)
+        </label>
+      </div>
       {state.error && (
         <p className="rounded-md bg-[var(--color-atrisk-bg)] p-2 text-sm text-[var(--color-atrisk)]">
           {state.error}

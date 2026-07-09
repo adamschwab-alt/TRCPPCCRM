@@ -132,16 +132,25 @@ export type WiringImportSummary = {
   unmatchedReps: string[];
 };
 
+export type WiringImportOptions = {
+  contacts: boolean;
+  ratings: boolean;
+  owners: boolean;
+};
+
 /**
- * Apply a parsed wiring workbook. Idempotent: re-running updates ratings in
- * place, only sets owners that changed, and skips contacts that already exist
- * (matched by account + name). Owner assignment requires a login whose full
- * name matches the workbook's "Assigned Rep" — unmatched reps are reported so
- * you can create the logins and re-run.
+ * Apply a parsed wiring workbook — scope controlled per run (contacts only,
+ * ratings, rep assignments, or any combination). Idempotent: re-running
+ * updates ratings in place, only sets owners that changed, and skips contacts
+ * that already exist (matched by account + name), so the workbook can be
+ * maintained and re-uploaded as the living template. Owner assignment requires
+ * a login whose full name matches the workbook's "Assigned Rep" — unmatched
+ * reps are reported so you can create the logins and re-run.
  */
 export async function runWiringImport(
   supabase: SupabaseClient<Database>,
   parsed: ParsedWiring,
+  opts: WiringImportOptions = { contacts: true, ratings: true, owners: true },
 ): Promise<WiringImportSummary> {
   const [{ data: accounts }, { data: branches }, { data: profiles }, { data: existingContacts }] =
     await Promise.all([
@@ -181,7 +190,7 @@ export async function runWiringImport(
   const missRep = new Set<string>();
 
   // ── Ratings (account grain, from the parent tab) ────────────────────────────
-  for (const { account, rating } of parsed.parentRatings) {
+  for (const { account, rating } of opts.ratings ? parsed.parentRatings : []) {
     const a = accountByName.get(account.trim().toLowerCase());
     if (!a) {
       missAccount.add(account);
@@ -222,7 +231,7 @@ export async function runWiringImport(
     const accountId = account?.id ?? branch!.account_id;
 
     // Owner assignment (needs a matching login)
-    if (row.assignedRep) {
+    if (opts.owners && row.assignedRep) {
       const repId = repByName.get(row.assignedRep.trim().toLowerCase());
       if (!repId) missRep.add(row.assignedRep);
       else {
@@ -239,7 +248,7 @@ export async function runWiringImport(
     }
 
     // Contacts (tier 5 = branch grain)
-    for (const c of row.contacts) {
+    for (const c of opts.contacts ? row.contacts : []) {
       const key = `${accountId}␟${c.name.trim().toLowerCase()}`;
       if (contactKeys.has(key)) {
         summary.contactsSkipped++;
@@ -259,7 +268,7 @@ export async function runWiringImport(
   }
 
   // ── Region roster contacts (tier 2 = regional/district) ────────────────────
-  for (const rc of parsed.regionContacts) {
+  for (const rc of opts.contacts ? parsed.regionContacts : []) {
     const a = accountByName.get(rc.accountPrefix.trim().toLowerCase());
     if (!a) {
       missAccount.add(rc.accountPrefix);
