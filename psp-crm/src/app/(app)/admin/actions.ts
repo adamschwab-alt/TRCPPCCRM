@@ -217,6 +217,59 @@ async function dedupeViaApi(): Promise<number> {
   return dupeIds.length;
 }
 
+/**
+ * Bulk-load the Customer Wiring workbook: relationship ratings (parent tab),
+ * rep assignments + contacts (branch tab), region roster contacts. Idempotent —
+ * re-running skips existing contacts and only writes changes.
+ */
+export async function importWiring(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireRole('admin');
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: 'Choose the Customer Wiring workbook (.xlsx) first.' };
+  }
+  const supabase = await createClient();
+  try {
+    const { parseWiringWorkbook, runWiringImport } = await import('@/lib/import/wiring-import');
+    const parsed = parseWiringWorkbook(Buffer.from(await file.arrayBuffer()));
+    if (parsed.branchRows.length === 0 && parsed.parentRatings.length === 0) {
+      return {
+        error:
+          'No wiring data found — is this the Customer Wiring workbook (with the "Customer Wiring - Branch" tab)?',
+      };
+    }
+    const s = await runWiringImport(supabase, parsed);
+    await logAudit(supabase, 'import', 'wiring_workbook', null, {
+      ratings: s.ratingsUpdated,
+      owners: s.branchOwnersSet,
+      contacts: s.contactsCreated,
+    });
+    revalidatePath('/', 'layout');
+    const parts = [
+      `${s.ratingsUpdated} rating${s.ratingsUpdated === 1 ? '' : 's'} updated`,
+      `${s.branchOwnersSet} branch owner${s.branchOwnersSet === 1 ? '' : 's'} set`,
+      `${s.accountOwnersSet} account owner${s.accountOwnersSet === 1 ? '' : 's'} filled`,
+      `${s.contactsCreated} contact${s.contactsCreated === 1 ? '' : 's'} added`,
+      `${s.contactsSkipped} already present`,
+    ];
+    const warnings: string[] = [];
+    if (s.unmatchedReps.length > 0)
+      warnings.push(
+        `No login found for: ${s.unmatchedReps.join(', ')} — create these users (exact full name), then re-run this import to assign their books.`,
+      );
+    if (s.unmatchedBranches.length > 0)
+      warnings.push(`Unmatched branches: ${s.unmatchedBranches.slice(0, 5).join('; ')}…`);
+    if (s.unmatchedAccounts.length > 0)
+      warnings.push(`Unmatched accounts: ${s.unmatchedAccounts.slice(0, 5).join('; ')}`);
+    return {
+      ok: true,
+      message: `Imported: ${parts.join(', ')}.${warnings.length ? ' ⚠ ' + warnings.join(' ') : ''}`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Wiring import failed' };
+  }
+}
+
 const eventSchema = z.object({
   kind: z.enum(['market', 'testimonial']),
   event_date: z.string().min(8, 'Pick a date'),

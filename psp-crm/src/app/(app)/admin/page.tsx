@@ -13,6 +13,7 @@ import {
   DedupeForm,
   RestoreForm,
   EvidenceForm,
+  WiringImportForm,
 } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
@@ -157,6 +158,19 @@ export default async function AdminPage() {
           </p>
         </Card>
       )}
+
+      <Card className="p-4">
+        <SectionTitle>Import Customer Wiring workbook</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Bulk-loads from PSP_Customer_Wiring.xlsx: <strong>relationship ratings</strong> (Customer
+          Wiring tab), <strong>rep assignments</strong> and <strong>customer contacts</strong>{' '}
+          (Customer Wiring — Branch tab, Contact/Email columns), and region roster contacts. Safe
+          to re-run — existing contacts are skipped and only changes are written. Rep assignment
+          needs a login whose full name matches the workbook&rsquo;s &ldquo;Assigned Rep&rdquo;
+          exactly; unmatched reps are listed so you can add them and re-run.
+        </p>
+        <WiringImportForm />
+      </Card>
 
       <Card className="p-4">
         <SectionTitle>Case-study evidence log</SectionTitle>

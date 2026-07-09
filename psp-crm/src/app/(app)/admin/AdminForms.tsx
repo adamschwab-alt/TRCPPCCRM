@@ -9,6 +9,7 @@ import {
   dedupeData,
   restoreFromWorkbook,
   addEvidence,
+  importWiring,
   type FormState,
 } from './actions';
 import type { TargetsRow } from '@/types/database';
@@ -29,6 +30,33 @@ export function SyncForm() {
       )}
       <button type="submit" disabled={pending} className="btn-primary" data-tap>
         {pending ? 'Syncing…' : 'Sync now'}
+      </button>
+    </form>
+  );
+}
+
+export function WiringImportForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(importWiring, {});
+  return (
+    <form action={action} className="space-y-3">
+      <input
+        type="file"
+        name="file"
+        accept=".xlsx,.xls"
+        className="border-line block w-full rounded-md border p-2 text-sm"
+      />
+      {state.error && (
+        <p className="rounded-md bg-[var(--color-atrisk-bg)] p-2 text-sm text-[var(--color-atrisk)]">
+          {state.error}
+        </p>
+      )}
+      {state.ok && (
+        <p className="rounded-md bg-[var(--color-ontrack-bg)] p-2 text-sm text-[var(--color-ontrack)]">
+          {state.message}
+        </p>
+      )}
+      <button type="submit" disabled={pending} className="btn-primary" data-tap>
+        {pending ? 'Importing…' : 'Import wiring workbook'}
       </button>
     </form>
   );
