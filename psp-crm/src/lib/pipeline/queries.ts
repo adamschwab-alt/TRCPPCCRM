@@ -9,6 +9,7 @@ export type EnrichedOpportunity = OpportunityRow & {
 
 export type AccountOption = { id: string; name: string };
 export type BranchOption = { id: string; account_id: string; name: string };
+export type ContactPickOption = { id: string; account_id: string; name: string; title: string | null };
 
 async function nameMaps() {
   const supabase = await createClient();
@@ -23,7 +24,14 @@ async function nameMaps() {
 }
 
 export async function getPipelineOptions() {
-  return nameMaps();
+  const supabase = await createClient();
+  const [maps, contactsRes] = await Promise.all([
+    nameMaps(),
+    supabase.from('contacts').select('id,account_id,name,title').order('name'),
+  ]);
+  // Tolerate a database that hasn't run migration 0007 yet (no contacts table).
+  const contacts = (contactsRes.data ?? []) as ContactPickOption[];
+  return { ...maps, contacts };
 }
 
 export async function getOpportunities(): Promise<EnrichedOpportunity[]> {

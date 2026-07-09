@@ -14,6 +14,30 @@ export type OppStage = 'Qualified' | 'Quoted' | 'Verbal' | 'Won' | 'Lost';
 export type LeadTimeRisk = 'Low' | 'Med' | 'High';
 export type ActivityType = 'call' | 'visit' | 'email' | 'note';
 export type TaskStatus = 'open' | 'done';
+export type OppSource =
+  | 'existing_account'
+  | 'new_branch'
+  | 'referral'
+  | 'inbound'
+  | 'event'
+  | 'cold'
+  | 'other';
+export type LostReason =
+  | 'price'
+  | 'availability'
+  | 'lead_time'
+  | 'spec'
+  | 'relationship'
+  | 'no_decision'
+  | 'competitor'
+  | 'other';
+export type ForecastCategory = 'pipeline' | 'best_case' | 'commit';
+export type ActivityOutcome =
+  | 'connected'
+  | 'left_msg'
+  | 'no_response'
+  | 'meeting_booked'
+  | 'meeting_held';
 
 export type ProfileRow = {
   id: string;
@@ -21,6 +45,10 @@ export type ProfileRow = {
   email: string;
   role: UserRole;
   is_active: boolean;
+  hired_at: string | null;
+  rollout_wave: number;
+  ai_enabled_at: string | null;
+  training_completed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -188,8 +216,34 @@ export type OpportunityRow = {
   next_step: string | null;
   next_date: string | null;
   notes: string | null;
+  source: OppSource | null;
+  lost_reason: LostReason | null;
+  lost_note: string | null;
+  forecast_category: ForecastCategory | null;
+  closed_at: string | null;
+  primary_contact_id: string | null;
+  competitor: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type OpportunityStageHistoryRow = {
+  id: number;
+  opportunity_id: string;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by: string | null;
+  changed_at: string;
+};
+
+export type ExogenousEventRow = {
+  id: string;
+  event_date: string;
+  title: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
 };
 
 export type ActivityRow = {
@@ -202,6 +256,8 @@ export type ActivityRow = {
   user_id: string | null;
   occurred_at: string;
   body: string | null;
+  outcome: ActivityOutcome | null;
+  source: string; // 'manual' | 'outlook' | 'system'
   created_at: string;
 };
 
@@ -255,6 +311,8 @@ export interface Database {
       activities: TableDef<ActivityRow>;
       tasks: TableDef<TaskRow>;
       stage_win_prob: TableDef<StageWinProbRow>;
+      opportunity_stage_history: TableDef<OpportunityStageHistoryRow>;
+      exogenous_events: TableDef<ExogenousEventRow>;
       audit_log: TableDef<AuditLogRow>;
       targets: TableDef<TargetsRow>;
       app_settings: TableDef<AppSettingsRow>;

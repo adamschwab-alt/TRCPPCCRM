@@ -75,6 +75,18 @@ export default async function AdminPage() {
       </Card>
 
       <Card className="p-4">
+        <SectionTitle>Baseline freeze (measurement)</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Downloads a dated snapshot of the entire book — KPIs, every account with its wiring
+          cadence, white-space, and day-0 funnel. Run this ONCE on rollout day and file it: it is
+          the &ldquo;before&rdquo; in every future before/after comparison. Generating it is logged.
+        </p>
+        <a href="/export/baseline" className="btn-primary" data-tap>
+          ⬇ Download baseline freeze
+        </a>
+      </Card>
+
+      <Card className="p-4">
         <SectionTitle>Add a user</SectionTitle>
         <p className="text-muted mb-3 text-xs">
           Creates an account with a temporary password. They set up 2FA on first login.

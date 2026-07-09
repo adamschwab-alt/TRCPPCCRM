@@ -6,7 +6,7 @@ import { getPipelineOptions, getStageWinProb } from '@/lib/pipeline/queries';
 export const dynamic = 'force-dynamic';
 
 export default async function NewOpportunityPage() {
-  const [{ accounts, branches }, stageWinProb] = await Promise.all([
+  const [{ accounts, branches, contacts }, stageWinProb] = await Promise.all([
     getPipelineOptions(),
     getStageWinProb(),
   ]);
@@ -20,6 +20,7 @@ export default async function NewOpportunityPage() {
         action={createOpportunity}
         accounts={accounts}
         branches={branches}
+        contacts={contacts}
         stageWinProb={stageWinProb}
         submitLabel="Create opportunity"
       />

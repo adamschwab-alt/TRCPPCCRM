@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function EditOpportunityPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [opp, { accounts, branches }, stageWinProb] = await Promise.all([
+  const [opp, { accounts, branches, contacts }, stageWinProb] = await Promise.all([
     getOpportunity(id),
     getPipelineOptions(),
     getStageWinProb(),
@@ -28,6 +28,7 @@ export default async function EditOpportunityPage({ params }: { params: Promise<
         action={update}
         accounts={accounts}
         branches={branches}
+        contacts={contacts}
         stageWinProb={stageWinProb}
         opp={opp}
         submitLabel="Save changes"

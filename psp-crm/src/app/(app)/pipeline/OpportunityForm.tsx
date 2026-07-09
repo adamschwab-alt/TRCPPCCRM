@@ -3,7 +3,7 @@
 import { useActionState, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { OpportunityRow } from '@/types/database';
-import type { AccountOption, BranchOption } from '@/lib/pipeline/queries';
+import type { AccountOption, BranchOption, ContactPickOption } from '@/lib/pipeline/queries';
 import type { FormState } from './actions';
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -12,6 +12,7 @@ export function OpportunityForm({
   action,
   accounts,
   branches,
+  contacts = [],
   stageWinProb,
   opp,
   submitLabel,
@@ -19,6 +20,7 @@ export function OpportunityForm({
   action: Action;
   accounts: AccountOption[];
   branches: BranchOption[];
+  contacts?: ContactPickOption[];
   stageWinProb: Record<string, number>;
   opp?: OpportunityRow;
   submitLabel: string;
@@ -38,6 +40,10 @@ export function OpportunityForm({
   const accountBranches = useMemo(
     () => branches.filter((b) => b.account_id === accountId),
     [branches, accountId],
+  );
+  const accountContacts = useMemo(
+    () => contacts.filter((c) => c.account_id === accountId),
+    [contacts, accountId],
   );
 
   function onStageChange(s: string) {
@@ -79,6 +85,18 @@ export function OpportunityForm({
                 {b.name}
               </option>
             ))}
+          </select>
+        </Field>
+        <Field label="Source *">
+          <select name="source" required className="input" defaultValue={opp?.source ?? ''}>
+            <option value="">Where did this come from?</option>
+            <option value="existing_account">Existing account</option>
+            <option value="new_branch">New branch activation</option>
+            <option value="referral">Referral</option>
+            <option value="inbound">Inbound call/web</option>
+            <option value="event">Trade show / event</option>
+            <option value="cold">Cold outreach</option>
+            <option value="other">Other</option>
           </select>
         </Field>
         <Field label="Type">
@@ -183,7 +201,79 @@ export function OpportunityForm({
             defaultValue={opp?.next_date ?? ''}
           />
         </Field>
+        <Field label={stage === 'Verbal' ? 'Primary contact *' : 'Primary contact'}>
+          <select
+            name="primary_contact_id"
+            className="input"
+            defaultValue={opp?.primary_contact_id ?? ''}
+          >
+            <option value="">— none —</option>
+            {accountContacts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.title ? ` (${c.title})` : ''}
+              </option>
+            ))}
+          </select>
+          {stage === 'Verbal' && accountContacts.length === 0 && (
+            <span className="mt-1 block text-xs text-[var(--color-watch)]">
+              No contacts on this account yet — add one from the account page first.
+            </span>
+          )}
+        </Field>
+        <Field label="Forecast category">
+          <select
+            name="forecast_category"
+            className="input"
+            defaultValue={opp?.forecast_category ?? ''}
+          >
+            <option value="">Auto (from stage)</option>
+            <option value="pipeline">Pipeline</option>
+            <option value="best_case">Best case</option>
+            <option value="commit">Commit</option>
+          </select>
+        </Field>
+        <Field label="Competitor (if any)">
+          <input
+            name="competitor"
+            className="input"
+            defaultValue={opp?.competitor ?? ''}
+            placeholder="e.g. United Trench"
+          />
+        </Field>
       </div>
+
+      {stage === 'Lost' && (
+        <div className="rounded-md bg-[var(--color-atrisk-bg)] p-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Lost reason *">
+              <select
+                name="lost_reason"
+                className="input"
+                defaultValue={opp?.lost_reason ?? ''}
+              >
+                <option value="">Why did we lose?</option>
+                <option value="price">Price</option>
+                <option value="availability">Availability / stock</option>
+                <option value="lead_time">Lead time</option>
+                <option value="spec">Spec / product fit</option>
+                <option value="relationship">Relationship</option>
+                <option value="no_decision">No decision / went quiet</option>
+                <option value="competitor">Chose competitor</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
+            <Field label="Lost note (optional)">
+              <input
+                name="lost_note"
+                className="input"
+                defaultValue={opp?.lost_note ?? ''}
+                placeholder="One line of color for win/loss review"
+              />
+            </Field>
+          </div>
+        </div>
+      )}
       <Field label="Notes">
         <textarea name="notes" rows={3} className="input" defaultValue={opp?.notes ?? ''} />
       </Field>
