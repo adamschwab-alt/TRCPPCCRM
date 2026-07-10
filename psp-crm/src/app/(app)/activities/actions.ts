@@ -14,6 +14,10 @@ const activitySchema = z.object({
   type: z.enum(['call', 'visit', 'email', 'note']),
   account_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
   occurred_on: z.preprocess(emptyToNull, z.string().nullable()),
+  outcome: z.preprocess(
+    emptyToNull,
+    z.enum(['connected', 'left_msg', 'no_response', 'meeting_booked', 'meeting_held']).nullable(),
+  ),
   body: z.preprocess(emptyToNull, z.string().min(1, 'Add a note').nullable()),
 });
 
@@ -23,6 +27,7 @@ export async function logActivity(_prev: FormState, formData: FormData): Promise
     type: formData.get('type'),
     account_id: formData.get('account_id'),
     occurred_on: formData.get('occurred_on'),
+    outcome: formData.get('outcome'),
     body: formData.get('body'),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
@@ -39,13 +44,15 @@ export async function logActivity(_prev: FormState, formData: FormData): Promise
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.from('activities').insert({
+  const insert: Record<string, unknown> = {
     type: parsed.data.type,
     account_id: parsed.data.account_id,
     body: parsed.data.body,
     user_id: userId,
     occurred_at: occurredAt,
-  });
+  };
+  if (parsed.data.outcome) insert.outcome = parsed.data.outcome; // pre-0008 tolerant
+  const { error } = await supabase.from('activities').insert(insert);
   if (error) return { error: error.message };
   await logAudit(supabase, 'log', 'activity', parsed.data.account_id, { type: parsed.data.type });
   revalidatePath('/my-day');

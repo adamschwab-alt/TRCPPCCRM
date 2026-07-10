@@ -1,9 +1,117 @@
 'use client';
 
 import Link from 'next/link';
+import { useActionState, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { DataTable, type Column } from '@/components/DataTable';
+import { logActivity, type FormState } from '../activities/actions';
 import { fmtCurrencyShort, fmtDate } from '@/lib/format';
 import type { CallCoverageRow } from '@/lib/activity/queries';
+
+/** Manager quick-log: a small modal to record a touch straight from the row. */
+function QuickLog({ row }: { row: CallCoverageRow }) {
+  const [open, setOpen] = useState(false);
+  const [state, action, pending] = useActionState<FormState, FormData>(logActivity, {});
+  const router = useRouter();
+  const today = new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    if (state.ok && open) {
+      router.refresh();
+      const t = setTimeout(() => setOpen(false), 700);
+      return () => clearTimeout(t);
+    }
+  }, [state.ok, open, router]);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="btn-secondary px-2.5 py-1 text-xs"
+        data-tap
+      >
+        Log
+      </button>
+      {open && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="bg-surface w-full max-w-md rounded-lg p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-charcoal text-sm font-semibold">
+              Log touch — {row.account_name}
+            </h3>
+            <form action={action} className="mt-3 space-y-3">
+              <input type="hidden" name="account_id" value={row.account_id} />
+              <div className="grid grid-cols-3 gap-2">
+                <label className="block">
+                  <span className="text-charcoal-2 mb-1 block text-xs font-medium">Type</span>
+                  <select name="type" className="input py-1.5" defaultValue="call">
+                    <option value="call">📞 Call</option>
+                    <option value="visit">🚗 Visit</option>
+                    <option value="email">✉️ Email</option>
+                    <option value="note">📝 Note</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-charcoal-2 mb-1 block text-xs font-medium">Outcome</span>
+                  <select name="outcome" className="input py-1.5" defaultValue="">
+                    <option value="">—</option>
+                    <option value="connected">Connected</option>
+                    <option value="left_msg">Left message</option>
+                    <option value="no_response">No response</option>
+                    <option value="meeting_booked">Meeting booked</option>
+                    <option value="meeting_held">Meeting held</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-charcoal-2 mb-1 block text-xs font-medium">When</span>
+                  <input
+                    name="occurred_on"
+                    type="date"
+                    className="input py-1.5"
+                    defaultValue={today}
+                    max={today}
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="text-charcoal-2 mb-1 block text-xs font-medium">Note</span>
+                <input name="body" className="input py-1.5" placeholder="What happened?" />
+              </label>
+              {state.error && (
+                <p className="text-xs text-[var(--color-atrisk)]">{state.error}</p>
+              )}
+              {state.ok && <p className="text-xs text-[var(--color-ontrack)]">Logged ✓</p>}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="btn-secondary px-3 py-1.5 text-sm"
+                  data-tap
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pending}
+                  className="btn-primary px-4 py-1.5 text-sm"
+                  data-tap
+                >
+                  {pending ? 'Saving…' : 'Save touch'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function DuePill({ r }: { r: CallCoverageRow }) {
   if (r.wiring.intervalDays == null)
@@ -97,9 +205,14 @@ export function CallCoverageTable({ rows, showOwner }: { rows: CallCoverageRow[]
       filter: (r) => r.status,
       cell: (r) => <DuePill r={r} />,
     },
+    {
+      key: 'log',
+      header: '',
+      cell: (r) => <QuickLog row={r} />,
+    },
   ];
 
-  const onMobile = new Set(['account', 'ttm', 'due']);
+  const onMobile = new Set(['account', 'ttm', 'due', 'log']);
   for (const c of columns) c.hideOnMobile = !onMobile.has(c.key);
 
   return (

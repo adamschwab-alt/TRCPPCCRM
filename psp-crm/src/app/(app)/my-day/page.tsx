@@ -43,6 +43,7 @@ export default async function MyDayPage({
 
   const today = new Date().toISOString().slice(0, 10);
   const openTasks = tasks.filter((t) => t.status === 'open');
+  const overdueTasks = openTasks.filter((t) => t.due_date && t.due_date < today);
   const doneTasks = tasks.filter((t) => t.status === 'done').slice(0, 5);
 
   // A rep viewing their own queue = an AI exposure event. Log today's top 10 as
@@ -130,6 +131,17 @@ export default async function MyDayPage({
         </p>
       )}
 
+      {overdueTasks.length > 0 && (
+        <a
+          href="#tasks"
+          className="mt-4 flex items-center gap-2 rounded-md bg-[var(--color-watch-bg)] px-3 py-2 text-sm font-medium text-[var(--color-watch)]"
+          data-tap
+        >
+          ⚠ {overdueTasks.length} overdue task{overdueTasks.length === 1 ? '' : 's'} — oldest:
+          &ldquo;{overdueTasks[0].title}&rdquo; (due {overdueTasks[0].due_date}) · jump to tasks ↓
+        </a>
+      )}
+
       <p className="text-muted mt-4 mb-3 text-xs">
         Ranked by dollars at stake × urgency against each account&rsquo;s wiring cadence. Branches
         you&rsquo;ve touched in the last two weeks drop down automatically. Log a touch to keep the
@@ -159,7 +171,7 @@ export default async function MyDayPage({
           </Card>
         </div>
 
-        <Card className="p-4">
+        <Card className="scroll-mt-20 p-4" id="tasks">
           <SectionTitle>My open tasks ({openTasks.length})</SectionTitle>
           <ul className="space-y-2">
             {openTasks.map((t) => (
