@@ -10,6 +10,8 @@ import {
   restoreFromWorkbook,
   addEvidence,
   importWiringData,
+  addRep,
+  connectRepEmail,
   type FormState,
 } from './actions';
 import type { TargetsRow } from '@/types/database';
@@ -122,6 +124,51 @@ export function WiringImportForm() {
         {pending ? 'Reading & importing…' : 'Import wiring workbook'}
       </button>
     </div>
+  );
+}
+
+export function AddRepForm() {
+  const [state, action, pending] = useActionState<FormState, FormData>(addRep, {});
+  return (
+    <form action={action} className="flex flex-wrap items-end gap-2">
+      <label className="block grow">
+        <span className="text-charcoal-2 mb-1 block text-xs font-medium">
+          Rep full name (exactly as in the wiring workbook)
+        </span>
+        <input name="full_name" className="input" placeholder="e.g. Brandon Christian" />
+      </label>
+      <button type="submit" disabled={pending} className="btn-primary" data-tap>
+        {pending ? 'Adding…' : '+ Add rep'}
+      </button>
+      {state.error && (
+        <p className="w-full text-sm text-[var(--color-atrisk)]">{state.error}</p>
+      )}
+      {state.ok && (
+        <p className="w-full rounded-md bg-[var(--color-ontrack-bg)] p-2 text-sm text-[var(--color-ontrack)]">
+          {state.message}
+        </p>
+      )}
+    </form>
+  );
+}
+
+export function ConnectEmailForm({ profileId }: { profileId: string }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(connectRepEmail, {});
+  return (
+    <form action={action} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="profile_id" value={profileId} />
+      <input
+        name="email"
+        type="email"
+        placeholder="their.email@company.com"
+        className="input max-w-[240px] py-1 text-xs"
+      />
+      <button type="submit" disabled={pending} className="btn-secondary px-2 py-1 text-xs" data-tap>
+        {pending ? 'Connecting…' : 'Connect email'}
+      </button>
+      {state.error && <span className="text-xs text-[var(--color-atrisk)]">{state.error}</span>}
+      {state.ok && <span className="text-xs text-[var(--color-ontrack)]">{state.message}</span>}
+    </form>
   );
 }
 

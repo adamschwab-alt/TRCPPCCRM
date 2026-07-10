@@ -4,8 +4,10 @@ import { Card, KpiTile, SectionTitle, StatusBadge, RagBadge } from '@/components
 import { getAccount, getBranchesForAccount } from '@/lib/metrics/queries';
 import { fmtCurrencyShort, fmtDeltaPct, fmtPct, fmtDate, whiteSpaceLabel } from '@/lib/format';
 import { createClient } from '@/lib/supabase/server';
+import { requireSession, isStaff } from '@/lib/auth';
 import { WiringCard, ContactsCard } from './CrmCards';
 import { BriefCard } from './BriefCard';
+import { BranchRepSelect } from './BranchRepSelect';
 import { aiConfigured } from '@/lib/ai/brief';
 import type { ContactRow } from '@/types/database';
 
@@ -15,6 +17,8 @@ export const maxDuration = 60;
 
 export default async function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const { profile } = await requireSession();
+  const staff = isStaff(profile.role);
   const account = await getAccount(id);
   if (!account) notFound();
   const branches = await getBranchesForAccount(id);
@@ -25,7 +29,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   const [{ data: accountRow }, contactsRes, { data: profiles }] = await Promise.all([
     supabase.from('accounts').select('*').eq('id', id).maybeSingle(),
     supabase.from('contacts').select('*').eq('account_id', id).order('tier'),
-    supabase.from('profiles').select('id,full_name,email'),
+    supabase.from('profiles').select('id,full_name,email,role,is_active'),
   ]);
   const rating = (accountRow as { relationship_rating?: number } | null)?.relationship_rating ?? 2;
   const contacts: ContactRow[] = contactsRes.data ?? [];
@@ -47,6 +51,11 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
     if (accountOwnerId) return repName.get(accountOwnerId) ?? null;
     return contactsByBranch.get(branchId)?.find((c) => c.covered_by)?.covered_by ?? null;
   };
+  // Assignable people for the inline Rep dropdown (staff view).
+  const repChoices = (profiles ?? [])
+    .filter((p) => p.is_active && (p.role === 'rep' || p.role === 'manager'))
+    .map((p) => ({ id: p.id, name: p.full_name || p.email }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div>
@@ -169,8 +178,19 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
                       );
                     })()}
                   </td>
-                  <td className="text-muted px-4 py-2.5">
-                    {repFor(b.branch_id, b.owner_id) ?? '—'}
+                  <td className="px-4 py-2.5">
+                    {staff ? (
+                      <BranchRepSelect
+                        branchId={b.branch_id}
+                        ownerId={b.owner_id}
+                        fallbackLabel={
+                          b.owner_id ? null : repFor(b.branch_id, null)
+                        }
+                        reps={repChoices}
+                      />
+                    ) : (
+                      <span className="text-muted">{repFor(b.branch_id, b.owner_id) ?? '—'}</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {fmtCurrencyShort(b.ttm_revenue)}

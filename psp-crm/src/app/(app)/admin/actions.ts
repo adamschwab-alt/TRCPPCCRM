@@ -286,6 +286,82 @@ export async function importWiringData(
   }
 }
 
+import { PENDING_EMAIL_DOMAIN } from '@/lib/roster';
+
+/**
+ * Rep roster, name-first (beta flow): create the rep NOW with a placeholder
+ * email so branches/accounts can be assigned and the wiring import matches by
+ * name — connect their real email later, when logins go live.
+ */
+export async function addRep(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireRole('admin');
+  const name = String(formData.get('full_name') ?? '').trim();
+  if (name.length < 3 || !name.includes(' ')) {
+    return { error: 'Enter the rep’s full name (first and last) — it must match the wiring workbook.' };
+  }
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { error: 'Service role key not configured in Vercel.' };
+  }
+  const slug = name.toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '');
+  const placeholder = `${slug}.${Math.random().toString(36).slice(2, 6)}@${PENDING_EMAIL_DOMAIN}`;
+  const { error } = await admin.auth.admin.createUser({
+    email: placeholder,
+    password: crypto.randomUUID(), // unusable until a real email is connected
+    email_confirm: true,
+    user_metadata: { full_name: name, role: 'rep' },
+  });
+  if (error) return { error: error.message };
+  await logAudit(await createClient(), 'create', 'rep', null, { full_name: name, pending: true });
+  revalidatePath('/admin');
+  return {
+    ok: true,
+    message: `${name} added to the roster — assign branches now; connect their email when you're ready to launch.`,
+  };
+}
+
+/** Beta launch: attach a real email to a name-only rep so they can log in. */
+export async function connectRepEmail(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireRole('admin');
+  const profileId = String(formData.get('profile_id') ?? '');
+  const parsedEmail = z.string().email('Enter a valid email').safeParse(formData.get('email'));
+  if (!parsedEmail.success) return { error: parsedEmail.error.issues[0].message };
+  const email = parsedEmail.data;
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { error: 'Service role key not configured in Vercel.' };
+  }
+  const { error } = await admin.auth.admin.updateUserById(profileId, {
+    email,
+    email_confirm: true,
+  });
+  if (error) return { error: error.message };
+  const supabase = await createClient();
+  await supabase.from('profiles').update({ email }).eq('id', profileId);
+  await logAudit(supabase, 'update', 'rep', profileId, { email_connected: true });
+
+  // Best-effort password-setup email (depends on SMTP being configured).
+  const origin = (await headers()).get('origin') ?? '';
+  let mailNote = '';
+  try {
+    const { error: mailErr } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/auth/confirm?next=/auth/set-password`,
+    });
+    mailNote = mailErr
+      ? ' Password email could not be sent — set a temporary password in Supabase → Authentication → Users.'
+      : ' A set-your-password email was sent (check spam if it doesn’t arrive).';
+  } catch {
+    mailNote = ' Set a temporary password in Supabase → Authentication → Users.';
+  }
+  revalidatePath('/admin');
+  return { ok: true, message: `Email connected: ${email}.${mailNote}` };
+}
+
 const eventSchema = z.object({
   kind: z.enum(['market', 'testimonial']),
   event_date: z.string().min(8, 'Pick a date'),

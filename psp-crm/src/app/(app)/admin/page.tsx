@@ -5,6 +5,7 @@ import { computeDq } from '@/lib/dq/queries';
 import { fmtPct } from '@/lib/format';
 import { getProfiles, getTargets, getAuditLog, getLastSync } from '@/lib/admin/queries';
 import { updateUser } from './actions';
+import { isPendingEmail } from '@/lib/roster';
 import {
   TargetsForm,
   InviteForm,
@@ -14,6 +15,8 @@ import {
   RestoreForm,
   EvidenceForm,
   WiringImportForm,
+  AddRepForm,
+  ConnectEmailForm,
 } from './AdminForms';
 import { fmtDate } from '@/lib/format';
 
@@ -67,6 +70,41 @@ export default async function AdminPage() {
           never overwrites a contact that already exists.
         </p>
         <WiringImportForm />
+      </Card>
+
+      <Card className="p-4">
+        <SectionTitle>Sales rep roster</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Beta flow: add reps by <strong>name</strong> now — branches can be assigned to them
+          immediately and the wiring import matches them. When you&rsquo;re ready to launch,
+          connect each rep&rsquo;s real email and they get a set-your-password link (or set a
+          temporary password in Supabase if email delivery isn&rsquo;t configured yet).
+        </p>
+        <AddRepForm />
+        {profiles.filter((p) => p.role === 'rep').length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {profiles
+              .filter((p) => p.role === 'rep')
+              .map((p) => (
+                <li
+                  key={p.id}
+                  className="bg-canvas flex flex-wrap items-center justify-between gap-2 rounded-md px-3 py-2"
+                >
+                  <div>
+                    <span className="text-charcoal text-sm font-medium">{p.full_name || '—'}</span>{' '}
+                    {isPendingEmail(p.email) ? (
+                      <span className="rounded-full bg-[var(--color-watch-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-watch)]">
+                        name only — no login yet
+                      </span>
+                    ) : (
+                      <span className="text-muted text-xs">{p.email}</span>
+                    )}
+                  </div>
+                  {isPendingEmail(p.email) && <ConnectEmailForm profileId={p.id} />}
+                </li>
+              ))}
+          </ul>
+        )}
       </Card>
 
       <Card className="p-4">

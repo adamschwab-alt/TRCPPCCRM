@@ -107,6 +107,25 @@ export async function setRelationshipRating(
   return {};
 }
 
+/** Inline rep reassignment from the branch table (manager/admin only). */
+export async function setBranchOwner(
+  branchId: string,
+  ownerId: string | null,
+): Promise<{ error?: string }> {
+  const { profile } = await requireSession();
+  if (!isStaff(profile.role)) return { error: 'Only managers and admins can reassign reps.' };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('branches')
+    .update({ owner_id: ownerId })
+    .eq('id', branchId);
+  if (error) return { error: error.message };
+  await logAudit(supabase, 'update', 'branch', branchId, { owner_id: ownerId });
+  revalidatePath('/accounts');
+  revalidatePath('/my-day');
+  return {};
+}
+
 const contactSchema = z.object({
   account_id: z.string().uuid(),
   branch_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
