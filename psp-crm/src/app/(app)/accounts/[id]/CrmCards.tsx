@@ -82,23 +82,33 @@ export function WiringCard({
   );
 }
 
-/** Contact list with inline add/edit. */
+export type BranchOpt = { id: string; name: string };
+
+/** Contact list with inline add/edit; each contact shows its branch. */
 export function ContactsCard({
   accountId,
   contacts,
+  branches = [],
 }: {
   accountId: string;
   contacts: ContactRow[];
+  branches?: BranchOpt[];
 }) {
   const [editing, setEditing] = useState<ContactRow | 'new' | null>(null);
+  const branchName = new Map(branches.map((b) => [b.id, b.name]));
+  const sorted = [...contacts].sort((a, b) => {
+    const ba = a.branch_id ? (branchName.get(a.branch_id) ?? '') : '';
+    const bb = b.branch_id ? (branchName.get(b.branch_id) ?? '') : '';
+    return ba.localeCompare(bb) || a.tier - b.tier || a.name.localeCompare(b.name);
+  });
 
   return (
     <div>
       {contacts.length === 0 && !editing && (
         <p className="text-muted text-sm">No contacts yet — add the people you call on.</p>
       )}
-      <ul className="space-y-2">
-        {contacts.map((c) => (
+      <ul className="max-h-[480px] space-y-2 overflow-y-auto pr-1">
+        {sorted.map((c) => (
           <li
             key={c.id}
             className="bg-canvas flex flex-wrap items-center justify-between gap-2 rounded-md px-3 py-2"
@@ -107,6 +117,11 @@ export function ContactsCard({
               <span className="text-charcoal text-sm font-medium">{c.name}</span>
               {c.title && <span className="text-muted text-sm"> · {c.title}</span>}
               <div className="text-muted text-xs">
+                {c.branch_id && branchName.has(c.branch_id) && (
+                  <span className="text-brand-700 font-medium">
+                    {branchName.get(c.branch_id)} ·{' '}
+                  </span>
+                )}
                 Tier {c.tier} — {TIER_LABELS[c.tier] ?? '—'}
                 {c.covered_by && <> · covered by {c.covered_by}</>}
               </div>
@@ -136,6 +151,7 @@ export function ContactsCard({
       {editing ? (
         <ContactForm
           accountId={accountId}
+          branches={branches}
           contact={editing === 'new' ? null : editing}
           onDone={() => setEditing(null)}
         />
@@ -155,10 +171,12 @@ export function ContactsCard({
 
 function ContactForm({
   accountId,
+  branches,
   contact,
   onDone,
 }: {
   accountId: string;
+  branches: BranchOpt[];
   contact: ContactRow | null;
   onDone: () => void;
 }) {
@@ -188,6 +206,17 @@ function ContactForm({
         <label className="block">
           <span className="text-charcoal-2 mb-1 block text-xs font-medium">Title</span>
           <input name="title" className="input" defaultValue={contact?.title ?? ''} />
+        </label>
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">Branch (optional)</span>
+          <select name="branch_id" className="input" defaultValue={contact?.branch_id ?? ''}>
+            <option value="">— account-wide —</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="block">
           <span className="text-charcoal-2 mb-1 block text-xs font-medium">Tier</span>

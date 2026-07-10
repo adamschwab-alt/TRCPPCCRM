@@ -91,7 +91,11 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
         </Card>
         <Card className="p-4">
           <SectionTitle>Contacts ({contacts.length})</SectionTitle>
-          <ContactsCard accountId={account.account_id} contacts={contacts} />
+          <ContactsCard
+            accountId={account.account_id}
+            contacts={contacts}
+            branches={branches.map((b) => ({ id: b.branch_id, name: b.branch_name }))}
+          />
         </Card>
       </div>
 

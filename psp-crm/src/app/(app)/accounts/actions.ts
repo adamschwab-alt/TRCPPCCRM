@@ -109,6 +109,7 @@ export async function setRelationshipRating(
 
 const contactSchema = z.object({
   account_id: z.string().uuid(),
+  branch_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
   name: z.string().min(1, 'Name is required'),
   title: z.preprocess(emptyToNull, z.string().nullable()),
   tier: z.coerce.number().int().min(1).max(5),
@@ -122,6 +123,7 @@ export async function saveContact(_prev: FormState, formData: FormData): Promise
   const id = String(formData.get('id') || '');
   const parsed = contactSchema.safeParse({
     account_id: formData.get('account_id'),
+    branch_id: formData.get('branch_id'),
     name: formData.get('name'),
     title: formData.get('title'),
     tier: formData.get('tier'),
