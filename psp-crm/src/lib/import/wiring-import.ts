@@ -47,7 +47,13 @@ function findHeader(rows: unknown[][], label: string): number {
 }
 
 export function parseWiringWorkbook(buffer: Buffer | ArrayBuffer): ParsedWiring {
-  const wb = XLSX.read(buffer, { type: 'buffer' });
+  // Runs in the BROWSER for uploads (Vercel caps request bodies at 4.5MB, and
+  // the workbook's 45k-row Data tab pushes it past that) and under Node for
+  // tests — hence the dual input handling.
+  const wb =
+    buffer instanceof ArrayBuffer
+      ? XLSX.read(new Uint8Array(buffer), { type: 'array' })
+      : XLSX.read(buffer, { type: 'buffer' });
   const grid = (name: string): unknown[][] =>
     wb.Sheets[name]
       ? (XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null }) as unknown[][])

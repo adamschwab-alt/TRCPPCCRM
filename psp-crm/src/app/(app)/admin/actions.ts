@@ -221,31 +221,36 @@ async function dedupeViaApi(): Promise<number> {
  * Bulk-load the Customer Wiring workbook: relationship ratings (parent tab),
  * rep assignments + contacts (branch tab), region roster contacts. Idempotent —
  * re-running skips existing contacts and only writes changes.
+ *
+ * The workbook itself is parsed in the BROWSER (it exceeds Vercel's 4.5MB
+ * request cap); this action receives only the extracted rows (~tens of KB).
  */
-export async function importWiring(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function importWiringData(
+  parsed: import('@/lib/import/wiring-import').ParsedWiring,
+  opts: import('@/lib/import/wiring-import').WiringImportOptions,
+): Promise<FormState> {
   await requireRole('admin');
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) {
-    return { error: 'Choose the Customer Wiring workbook (.xlsx) first.' };
-  }
-  const opts = {
-    contacts: formData.get('do_contacts') === 'on',
-    ratings: formData.get('do_ratings') === 'on',
-    owners: formData.get('do_owners') === 'on',
-  };
   if (!opts.contacts && !opts.ratings && !opts.owners) {
     return { error: 'Tick at least one thing to import.' };
   }
+  // Sanity bounds — this arrives from the client, so cap it defensively.
+  if (
+    !parsed ||
+    (parsed.branchRows?.length ?? 0) > 5000 ||
+    (parsed.parentRatings?.length ?? 0) > 5000 ||
+    (parsed.regionContacts?.length ?? 0) > 5000
+  ) {
+    return { error: 'Import payload looks malformed — re-select the workbook and try again.' };
+  }
+  if ((parsed.branchRows?.length ?? 0) === 0 && (parsed.parentRatings?.length ?? 0) === 0) {
+    return {
+      error:
+        'No wiring data found — is this the Customer Wiring workbook (with the "Customer Wiring - Branch" tab)?',
+    };
+  }
   const supabase = await createClient();
   try {
-    const { parseWiringWorkbook, runWiringImport } = await import('@/lib/import/wiring-import');
-    const parsed = parseWiringWorkbook(Buffer.from(await file.arrayBuffer()));
-    if (parsed.branchRows.length === 0 && parsed.parentRatings.length === 0) {
-      return {
-        error:
-          'No wiring data found — is this the Customer Wiring workbook (with the "Customer Wiring - Branch" tab)?',
-      };
-    }
+    const { runWiringImport } = await import('@/lib/import/wiring-import');
     const s = await runWiringImport(supabase, parsed, opts);
     await logAudit(supabase, 'import', 'wiring_workbook', null, {
       ratings: s.ratingsUpdated,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useRef, useState } from 'react';
 import {
   updateTargets,
   inviteUser,
@@ -9,7 +9,7 @@ import {
   dedupeData,
   restoreFromWorkbook,
   addEvidence,
-  importWiring,
+  importWiringData,
   type FormState,
 } from './actions';
 import type { TargetsRow } from '@/types/database';
@@ -36,24 +36,76 @@ export function SyncForm() {
 }
 
 export function WiringImportForm() {
-  const [state, action, pending] = useActionState<FormState, FormData>(importWiring, {});
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [doContacts, setDoContacts] = useState(true);
+  const [doRatings, setDoRatings] = useState(false);
+  const [doOwners, setDoOwners] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [state, setState] = useState<FormState>({});
+
+  async function run() {
+    const file = fileRef.current?.files?.[0];
+    if (!file) {
+      setState({ error: 'Choose the Customer Wiring workbook (.xlsx) first.' });
+      return;
+    }
+    setPending(true);
+    setState({});
+    try {
+      // Parse in the browser — the workbook (with its 45k-row Data tab) is
+      // larger than the platform's upload cap; only the extracted rows travel.
+      const { parseWiringWorkbook } = await import('@/lib/import/wiring-import');
+      const parsed = parseWiringWorkbook(await file.arrayBuffer());
+      const res = await importWiringData(parsed, {
+        contacts: doContacts,
+        ratings: doRatings,
+        owners: doOwners,
+      });
+      setState(res.error ? res : { ok: true, message: res.message });
+    } catch (e) {
+      setState({
+        error:
+          e instanceof Error
+            ? `Could not read the workbook: ${e.message}`
+            : 'Could not read the workbook.',
+      });
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
-    <form action={action} className="space-y-3">
+    <div className="space-y-3">
       <input
+        ref={fileRef}
         type="file"
-        name="file"
         accept=".xlsx,.xls"
         className="border-line block w-full rounded-md border p-2 text-sm"
       />
       <div className="flex flex-wrap gap-4">
         <label className="text-charcoal-2 flex items-center gap-1.5 text-sm">
-          <input type="checkbox" name="do_contacts" defaultChecked /> Customer contacts
+          <input
+            type="checkbox"
+            checked={doContacts}
+            onChange={(e) => setDoContacts(e.target.checked)}
+          />{' '}
+          Customer contacts
         </label>
         <label className="text-charcoal-2 flex items-center gap-1.5 text-sm">
-          <input type="checkbox" name="do_ratings" /> Relationship ratings
+          <input
+            type="checkbox"
+            checked={doRatings}
+            onChange={(e) => setDoRatings(e.target.checked)}
+          />{' '}
+          Relationship ratings
         </label>
         <label className="text-charcoal-2 flex items-center gap-1.5 text-sm">
-          <input type="checkbox" name="do_owners" /> Rep assignments (needs logins)
+          <input
+            type="checkbox"
+            checked={doOwners}
+            onChange={(e) => setDoOwners(e.target.checked)}
+          />{' '}
+          Rep assignments (needs logins)
         </label>
       </div>
       {state.error && (
@@ -66,10 +118,10 @@ export function WiringImportForm() {
           {state.message}
         </p>
       )}
-      <button type="submit" disabled={pending} className="btn-primary" data-tap>
-        {pending ? 'Importing…' : 'Import wiring workbook'}
+      <button type="button" onClick={run} disabled={pending} className="btn-primary" data-tap>
+        {pending ? 'Reading & importing…' : 'Import wiring workbook'}
       </button>
-    </form>
+    </div>
   );
 }
 
