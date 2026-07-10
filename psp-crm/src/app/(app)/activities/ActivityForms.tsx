@@ -34,6 +34,16 @@ export function LogActivityForm({ accounts }: { accounts: AccountOption[] }) {
             ))}
           </select>
         </label>
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">When</span>
+          <input
+            name="occurred_on"
+            type="date"
+            className="input"
+            defaultValue={new Date().toISOString().slice(0, 10)}
+            max={new Date().toISOString().slice(0, 10)}
+          />
+        </label>
       </div>
       <label className="block">
         <span className="text-charcoal-2 mb-1 block text-xs font-medium">Note</span>

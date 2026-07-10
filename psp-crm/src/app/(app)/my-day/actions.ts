@@ -16,8 +16,29 @@ const touchSchema = z.object({
   contact_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
   recommendation_id: z.preprocess(emptyToNull, z.string().uuid().nullable()),
   type: z.enum(['call', 'visit', 'email', 'note']),
+  outcome: z.preprocess(
+    emptyToNull,
+    z.enum(['connected', 'left_msg', 'no_response', 'meeting_booked', 'meeting_held']).nullable(),
+  ),
+  occurred_on: z.preprocess(emptyToNull, z.string().nullable()), // yyyy-mm-dd, backdating allowed
+  followup_date: z.preprocess(emptyToNull, z.string().nullable()),
+  branch_label: z.preprocess(emptyToNull, z.string().max(200).nullable()),
   body: z.preprocess(emptyToNull, z.string().max(2000).nullable()),
 });
+
+/**
+ * Resolve the touch timestamp. Backdating is allowed (call yesterday, log
+ * today) within 60 days; future dates are rejected. Same-day = "now" so intra-
+ * day ordering stays natural.
+ */
+function resolveOccurredAt(occurredOn: string | null): { ts?: string; error?: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!occurredOn || occurredOn === today) return { ts: new Date().toISOString() };
+  if (occurredOn > today) return { error: 'Touch date can’t be in the future.' };
+  const cutoff = new Date(Date.now() - 60 * 86_400_000).toISOString().slice(0, 10);
+  if (occurredOn < cutoff) return { error: 'Backdating is limited to the last 60 days.' };
+  return { ts: `${occurredOn}T12:00:00.000Z` };
+}
 
 /**
  * Log an outreach touch against a branch from the My Day worklist. Recorded as
@@ -32,9 +53,20 @@ export async function logTouch(_prev: TouchState, formData: FormData): Promise<T
     contact_id: formData.get('contact_id'),
     recommendation_id: formData.get('recommendation_id'),
     type: formData.get('type'),
+    outcome: formData.get('outcome'),
+    occurred_on: formData.get('occurred_on'),
+    followup_date: formData.get('followup_date'),
+    branch_label: formData.get('branch_label'),
     body: formData.get('body'),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+
+  const when = resolveOccurredAt(parsed.data.occurred_on);
+  if (when.error) return { error: when.error };
+  const today = new Date().toISOString().slice(0, 10);
+  if (parsed.data.followup_date && parsed.data.followup_date < today) {
+    return { error: 'Follow-up date should be today or later.' };
+  }
 
   const supabase = await createClient();
   const insert: Record<string, unknown> = {
@@ -43,11 +75,12 @@ export async function logTouch(_prev: TouchState, formData: FormData): Promise<T
     account_id: parsed.data.account_id,
     body: parsed.data.body,
     user_id: userId,
-    occurred_at: new Date().toISOString(),
+    occurred_at: when.ts,
   };
-  // contact_id column arrives with migration 0007 — only send it when used, so
-  // touch logging keeps working on databases that haven't run it yet.
+  // Optional columns from later migrations — only send when used, so touch
+  // logging keeps working on databases that haven't run them yet.
   if (parsed.data.contact_id) insert.contact_id = parsed.data.contact_id;
+  if (parsed.data.outcome) insert.outcome = parsed.data.outcome;
   const { data: created, error } = await supabase
     .from('activities')
     .insert(insert)
@@ -67,6 +100,19 @@ export async function logTouch(_prev: TouchState, formData: FormData): Promise<T
       })
       .eq('id', parsed.data.recommendation_id)
       .eq('user_id', userId);
+  }
+
+  // Optional follow-up → a task on the rep's list, due that day.
+  if (parsed.data.followup_date) {
+    await supabase.from('tasks').insert({
+      title: `Follow up — ${parsed.data.branch_label ?? 'branch'}`,
+      due_date: parsed.data.followup_date,
+      account_id: parsed.data.account_id,
+      branch_id: parsed.data.branch_id,
+      assignee_id: userId,
+      created_by: userId,
+      status: 'open',
+    });
   }
 
   await logAudit(supabase, 'touch', 'branch', parsed.data.branch_id, { type: parsed.data.type });

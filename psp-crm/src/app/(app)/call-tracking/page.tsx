@@ -127,7 +127,13 @@ export default async function CallTrackingPage({
                 {series.weeks.map((w, i) => {
                   const total = series.reps.reduce((s, r) => s + r.counts[i], 0);
                   return (
-                    <div key={w} className="flex flex-1 flex-col justify-end gap-px" title={`${w}: ${total}`}>
+                    <div
+                      key={w}
+                      // h-full is load-bearing: without an explicit column height,
+                      // the %-sized bar segments collapse to zero.
+                      className="flex h-full flex-1 flex-col justify-end gap-px"
+                      title={`${w}: ${total}`}
+                    >
                       {series.reps.map((r, ri) =>
                         r.counts[i] > 0 ? (
                           <div

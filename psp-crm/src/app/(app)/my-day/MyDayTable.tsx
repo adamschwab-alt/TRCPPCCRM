@@ -270,6 +270,7 @@ function TouchForm({
     <form ref={ref} action={action} className="border-line bg-canvas/60 border-t p-3">
       <input type="hidden" name="branch_id" value={row.branch.branch_id} />
       <input type="hidden" name="account_id" value={row.branch.account_id} />
+      <input type="hidden" name="branch_label" value={row.branch.branch_name} />
       {rec && rec.status === 'shown' && (
         <input type="hidden" name="recommendation_id" value={rec.id} />
       )}
@@ -282,6 +283,28 @@ function TouchForm({
             <option value="email">✉️ Email</option>
             <option value="note">📝 Note</option>
           </select>
+        </label>
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">Outcome</span>
+          <select name="outcome" className="input py-1.5" defaultValue="">
+            <option value="">—</option>
+            <option value="connected">Connected</option>
+            <option value="left_msg">Left message</option>
+            <option value="no_response">No response</option>
+            <option value="meeting_booked">Meeting booked</option>
+            <option value="meeting_held">Meeting held</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">When</span>
+          <input
+            name="occurred_on"
+            type="date"
+            className="input py-1.5"
+            defaultValue={new Date().toISOString().slice(0, 10)}
+            max={new Date().toISOString().slice(0, 10)}
+            title="Backdate up to 60 days if you're logging a past call"
+          />
         </label>
         {contacts.length > 0 && (
           <label className="block">
@@ -297,6 +320,16 @@ function TouchForm({
             </select>
           </label>
         )}
+        <label className="block">
+          <span className="text-charcoal-2 mb-1 block text-xs font-medium">Follow-up (optional)</span>
+          <input
+            name="followup_date"
+            type="date"
+            className="input py-1.5"
+            min={new Date().toISOString().slice(0, 10)}
+            title="Creates a task on your list for that day"
+          />
+        </label>
         <label className="block flex-1">
           <span className="text-charcoal-2 mb-1 block text-xs font-medium">Note (optional)</span>
           <input
