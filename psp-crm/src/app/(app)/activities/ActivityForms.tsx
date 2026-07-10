@@ -7,9 +7,11 @@ import type { AccountOption } from '@/lib/activities/queries';
 export function LogActivityForm({ accounts }: { accounts: AccountOption[] }) {
   const [state, action, pending] = useActionState<FormState, FormData>(logActivity, {});
   const ref = useRef<HTMLFormElement>(null);
+  // Depend on `state` (a fresh object per submit), not `state.ok` — after two
+  // successes in a row the boolean doesn't change and the reset would not re-fire.
   useEffect(() => {
     if (state.ok) ref.current?.reset();
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <form ref={ref} action={action} className="space-y-3">
@@ -63,7 +65,7 @@ export function AddTaskForm({ accounts }: { accounts: AccountOption[] }) {
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (state.ok) ref.current?.reset();
-  }, [state.ok]);
+  }, [state]);
 
   return (
     <form ref={ref} action={action} className="space-y-3">

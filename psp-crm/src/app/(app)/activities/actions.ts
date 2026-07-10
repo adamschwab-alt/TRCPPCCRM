@@ -18,7 +18,8 @@ const activitySchema = z.object({
     emptyToNull,
     z.enum(['connected', 'left_msg', 'no_response', 'meeting_booked', 'meeting_held']).nullable(),
   ),
-  body: z.preprocess(emptyToNull, z.string().min(1, 'Add a note').nullable()),
+  // The note is optional by design — quick-log flows record type/outcome only.
+  body: z.preprocess(emptyToNull, z.string().max(2000, 'Note is too long').nullable()),
 });
 
 export async function logActivity(_prev: FormState, formData: FormData): Promise<FormState> {

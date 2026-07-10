@@ -399,30 +399,34 @@ export async function addEvidence(_prev: FormState, formData: FormData): Promise
   return { ok: true, message: parsed.data.kind === 'testimonial' ? 'Testimonial logged.' : 'Market event logged.' };
 }
 
-const num = (v: unknown) => z.coerce.number().parse(v);
+// Form fields arrive as strings. '' must be rejected — z.coerce turns it into 0,
+// which would silently zero a target — and bad input must come back as a form
+// error, not an unhandled throw.
+const formNum = z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number());
 
+// GRR/NRR/retention are entered as percentages in the UI → validated in percent,
+// stored as ratios.
 const targetsSchema = z.object({
-  grr_target: z.coerce.number().min(0).max(2),
-  nrr_target: z.coerce.number().min(0).max(3),
-  new_biz_target: z.coerce.number().min(0),
-  xsell_target: z.coerce.number().int().min(0),
-  pipeline_coverage_target: z.coerce.number().min(0),
-  contraction_ceiling: z.coerce.number().min(0),
-  retention_floor: z.coerce.number().min(0).max(1),
-  cadence_days: z.coerce.number().int().min(1),
+  grr_target: formNum.pipe(z.number().min(0).max(200)).transform((n) => n / 100),
+  nrr_target: formNum.pipe(z.number().min(0).max(300)).transform((n) => n / 100),
+  new_biz_target: formNum.pipe(z.number().min(0)),
+  xsell_target: formNum.pipe(z.number().int().min(0)),
+  pipeline_coverage_target: formNum.pipe(z.number().min(0)),
+  contraction_ceiling: formNum.pipe(z.number().min(0)),
+  retention_floor: formNum.pipe(z.number().min(0).max(100)).transform((n) => n / 100),
+  cadence_days: formNum.pipe(z.number().int().min(1)),
 });
 
 export async function updateTargets(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireRole('admin');
-  // GRR/NRR/retention entered as percentages in the UI → store as ratios.
   const parsed = targetsSchema.safeParse({
-    grr_target: num(formData.get('grr_target')) / 100,
-    nrr_target: num(formData.get('nrr_target')) / 100,
+    grr_target: formData.get('grr_target'),
+    nrr_target: formData.get('nrr_target'),
     new_biz_target: formData.get('new_biz_target'),
     xsell_target: formData.get('xsell_target'),
     pipeline_coverage_target: formData.get('pipeline_coverage_target'),
     contraction_ceiling: formData.get('contraction_ceiling'),
-    retention_floor: num(formData.get('retention_floor')) / 100,
+    retention_floor: formData.get('retention_floor'),
     cadence_days: formData.get('cadence_days'),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };

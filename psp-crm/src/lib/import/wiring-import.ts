@@ -4,6 +4,7 @@
 import * as XLSX from 'xlsx';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
+import { fetchAll } from '@/lib/supabase/fetch-all';
 
 export type WiringContact = { name: string; email: string | null };
 
@@ -158,27 +159,42 @@ export async function runWiringImport(
   parsed: ParsedWiring,
   opts: WiringImportOptions = { contacts: true, ratings: true, owners: true },
 ): Promise<WiringImportSummary> {
-  const [{ data: accounts }, { data: branches }, { data: profiles }, { data: existingContacts }] =
-    await Promise.all([
-      supabase.from('accounts').select('id,name,owner_id,relationship_rating'),
-      supabase.from('branches').select('id,account_id,name,owner_id'),
-      supabase.from('profiles').select('id,full_name,is_active'),
-      supabase.from('contacts').select('id,account_id,name'),
-    ]);
+  // fetchAll: accounts/branches/contacts all exceed PostgREST's 1000-row cap at
+  // real book size — a truncated read would mis-file rows as "unmatched" and
+  // re-insert contacts that already exist.
+  type AccountRef = { id: string; name: string; owner_id: string | null; relationship_rating: number | null };
+  type BranchRef = { id: string; account_id: string; name: string; owner_id: string | null };
+  const [accounts, branches, profiles, existingContacts] = await Promise.all([
+    fetchAll<AccountRef>((from, to) =>
+      supabase.from('accounts').select('id,name,owner_id,relationship_rating').order('id').range(from, to),
+    ),
+    fetchAll<BranchRef>((from, to) =>
+      supabase.from('branches').select('id,account_id,name,owner_id').order('id').range(from, to),
+    ),
+    fetchAll<{ id: string; full_name: string | null; is_active: boolean }>((from, to) =>
+      supabase.from('profiles').select('id,full_name,is_active').order('id').range(from, to),
+    ),
+    fetchAll<{ id: string; account_id: string; name: string }>((from, to) =>
+      supabase.from('contacts').select('id,account_id,name').order('id').range(from, to),
+    ),
+  ]);
 
-  const accountByName = new Map(
-    (accounts ?? []).map((a) => [a.name.trim().toLowerCase(), a]),
+  const accountByName = new Map(accounts.map((a) => [a.name.trim().toLowerCase(), a]));
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
+  // Branch names repeat across accounts ("Denver", "Phoenix"...), so the primary
+  // key is (account, branch). The name-only map is a fallback for rows whose
+  // parent column is blank or doesn't match an account.
+  const branchByAccountAndName = new Map(
+    branches.map((b) => [`${b.account_id}␟${b.name.trim().toLowerCase()}`, b]),
   );
-  const branchByName = new Map(
-    (branches ?? []).map((b) => [b.name.trim().toLowerCase(), b]),
-  );
+  const branchByName = new Map(branches.map((b) => [b.name.trim().toLowerCase(), b]));
   const repByName = new Map(
-    (profiles ?? [])
+    profiles
       .filter((p) => p.is_active && p.full_name)
       .map((p) => [p.full_name!.trim().toLowerCase(), p.id]),
   );
   const contactKeys = new Set(
-    (existingContacts ?? []).map((c) => `${c.account_id}␟${c.name.trim().toLowerCase()}`),
+    existingContacts.map((c) => `${c.account_id}␟${c.name.trim().toLowerCase()}`),
   );
 
   const summary: WiringImportSummary = {
@@ -224,12 +240,17 @@ export async function runWiringImport(
   const repAccounts = new Map<string, Set<string>>(); // repId → account ids (for account-owner fill)
 
   for (const row of parsed.branchRows) {
-    const branch = branchByName.get(row.branchName.trim().toLowerCase());
-    const account = row.parentName
+    const branchNameKey = row.branchName.trim().toLowerCase();
+    const parentAccount = row.parentName
       ? accountByName.get(row.parentName.trim().toLowerCase())
-      : branch
-        ? (accounts ?? []).find((a) => a.id === branch.account_id)
-        : undefined;
+      : undefined;
+    // When the parent account is known, resolve the branch WITHIN it — a
+    // name-only match could silently hit a same-named branch of another
+    // account. Name-only lookup is only for rows with no usable parent.
+    const branch = parentAccount
+      ? branchByAccountAndName.get(`${parentAccount.id}␟${branchNameKey}`)
+      : branchByName.get(branchNameKey);
+    const account = parentAccount ?? (branch ? accountById.get(branch.account_id) : undefined);
     if (!branch && !account) {
       missBranch.add(row.branchName);
       continue;
@@ -313,7 +334,7 @@ export async function runWiringImport(
   }
   for (const [accId, reps] of accountRepVotes) {
     if (reps.size !== 1) continue;
-    const a = (accounts ?? []).find((x) => x.id === accId);
+    const a = accountById.get(accId);
     if (a && !a.owner_id) {
       const { error } = await supabase
         .from('accounts')

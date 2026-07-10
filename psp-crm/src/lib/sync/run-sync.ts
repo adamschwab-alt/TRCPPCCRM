@@ -100,7 +100,7 @@ export async function performSync(
       ok: true,
       empty: false,
       summary,
-      message: `Checked ${summary.transactions.total} recent rows: +${summary.transactions.inserted} new, ${summary.transactions.skippedDuplicates} already present. Data current through the ${summary.asOfDate.slice(0, 7)} period.`,
+      message: `Checked ${summary.transactions.total} recent rows: +${summary.transactions.inserted} new, ${summary.transactions.skippedDuplicates} already present. Data current through ${summary.asOfDate}.`,
     };
   } finally {
     syncInFlight = false;

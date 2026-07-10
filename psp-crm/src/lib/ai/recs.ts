@@ -151,12 +151,20 @@ export async function backfillRecOutcomes(admin: Db): Promise<number> {
     if (rec.type === 'deal_risk' && rec.opportunity_id) {
       const { data: moves } = await admin
         .from('opportunity_stage_history')
-        .select('field,new_value,changed_at')
+        .select('field,old_value,new_value,changed_at')
         .eq('opportunity_id', rec.opportunity_id)
         .eq('field', 'stage')
         .gt('changed_at', rec.shown_at)
         .lte('changed_at', windowEnd);
-      outcome.stage_advanced = (moves ?? []).some((m) => m.new_value !== 'Lost');
+      // "Advanced" = moved UP the funnel. A slide from Verbal back to Quoted
+      // isn't progress, so compare stage ranks rather than "wasn't Lost".
+      const rank: Record<string, number> = { Qualified: 1, Quoted: 2, Verbal: 3, Won: 4 };
+      outcome.stage_advanced = (moves ?? []).some(
+        (m) =>
+          m.new_value != null &&
+          m.old_value != null &&
+          (rank[m.new_value] ?? 0) > (rank[m.old_value] ?? 0),
+      );
       outcome.closed_lost = (moves ?? []).some((m) => m.new_value === 'Lost');
     }
 

@@ -3,6 +3,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
 import type { ImportDataset } from '@/lib/adapters';
+import { fetchAll } from '@/lib/supabase/fetch-all';
 
 export interface ImportSummary {
   accounts: { inserted: number; existing: number };
@@ -21,13 +22,6 @@ const chunk = <T>(arr: T[], size: number): T[][] => {
 const dedupeKey = (invoice: string | null, so: string | null, line: string | null) =>
   `${invoice ?? ''}␟${so ?? ''}␟${line ?? ''}`;
 
-/** Last calendar day of a yyyy-mm-dd date's month. */
-function endOfMonth(iso: string): string {
-  const d = new Date(iso + 'T00:00:00Z');
-  const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-  return end.toISOString().slice(0, 10);
-}
-
 /**
  * Idempotent upsert of a normalized dataset (§6). Uses the service-role client to
  * bypass RLS. Dedupes accounts by name, branches by (account, name), and
@@ -39,10 +33,13 @@ export async function runImport(
   opts: { asOfDate?: string; sinceDate?: string } = {},
 ): Promise<ImportSummary> {
   // ── accounts ──────────────────────────────────────────────────────────────
-  const { data: existingAccounts, error: aErr } = await supabase.from('accounts').select('id,name');
-  if (aErr) throw aErr;
+  // fetchAll: an unpaged select caps at 1000 rows — a missed existing account
+  // would be re-inserted and abort the whole import on the unique name index.
+  const existingAccounts = await fetchAll<{ id: string; name: string }>((from, to) =>
+    supabase.from('accounts').select('id,name').order('id').range(from, to),
+  );
   const accountIdByName = new Map<string, string>(
-    (existingAccounts ?? []).map((a) => [a.name.toLowerCase(), a.id]),
+    existingAccounts.map((a) => [a.name.toLowerCase(), a.id]),
   );
   const newAccounts = dataset.accounts.filter((a) => !accountIdByName.has(a.name.toLowerCase()));
   for (const batch of chunk(newAccounts, 500)) {
@@ -55,13 +52,12 @@ export async function runImport(
   }
 
   // ── branches ──────────────────────────────────────────────────────────────
-  const { data: existingBranches, error: bErr } = await supabase
-    .from('branches')
-    .select('id,account_id,name');
-  if (bErr) throw bErr;
+  const existingBranches = await fetchAll<{ id: string; account_id: string; name: string }>(
+    (from, to) => supabase.from('branches').select('id,account_id,name').order('id').range(from, to),
+  );
   const branchKey = (accountId: string, name: string) => `${accountId}␟${name.toLowerCase()}`;
   const branchIdByKey = new Map<string, string>(
-    (existingBranches ?? []).map((b) => [branchKey(b.account_id, b.name), b.id]),
+    existingBranches.map((b) => [branchKey(b.account_id, b.name), b.id]),
   );
   const newBranches = dataset.branches
     .map((b) => ({ ...b, account_id: accountIdByName.get(b.account_name.toLowerCase()) }))
@@ -173,14 +169,19 @@ export async function runImport(
     skippedDuplicates += r.dup;
   }
 
-  // ── as_of_date = latest complete month-end across booked transactions ──────
+  // ── as_of_date = newest booked transaction date ─────────────────────────────
+  // NOT the month-end: rounding a July-2 sync up to July-31 future-dates the
+  // metric window — days_idle inflates by the rest of the month (a branch that
+  // ordered yesterday shows ~30d idle) and TTM includes weeks that haven't
+  // happened yet, biasing status toward Declining. Rolling windows anchored on
+  // the real data edge measure honestly. (Seed/oracle paths still pass an
+  // explicit month-end via opts.asOfDate.)
   const bookedDates = dataset.transactions
     .filter((t) => t.status !== 'Canceled')
     .map((t) => t.date)
     .sort();
   const maxDate = bookedDates[bookedDates.length - 1];
-  const asOfDate =
-    opts.asOfDate ?? (maxDate ? endOfMonth(maxDate) : new Date().toISOString().slice(0, 10));
+  const asOfDate = opts.asOfDate ?? maxDate ?? new Date().toISOString().slice(0, 10);
   // updated_at doubles as the "last refreshed" timestamp (no trigger on this
   // table), so stamp it explicitly.
   const { error: settErr } = await supabase

@@ -8,21 +8,12 @@ import { logActivity, type FormState } from '../activities/actions';
 import { fmtCurrencyShort, fmtDate } from '@/lib/format';
 import type { CallCoverageRow } from '@/lib/activity/queries';
 
-/** Manager quick-log: a small modal to record a touch straight from the row. */
+/** Manager quick-log: a small modal to record a touch straight from the row.
+ *  The form (and its useActionState) lives in QuickLogForm, which unmounts on
+ *  close — so re-opening the modal always starts with fresh state instead of a
+ *  stale success that would auto-close it. */
 function QuickLog({ row }: { row: CallCoverageRow }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState<FormState, FormData>(logActivity, {});
-  const router = useRouter();
-  const today = new Date().toISOString().slice(0, 10);
-
-  useEffect(() => {
-    if (state.ok && open) {
-      router.refresh();
-      const t = setTimeout(() => setOpen(false), 700);
-      return () => clearTimeout(t);
-    }
-  }, [state.ok, open, router]);
-
   return (
     <>
       <button
@@ -33,11 +24,29 @@ function QuickLog({ row }: { row: CallCoverageRow }) {
       >
         Log
       </button>
-      {open && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
-          onClick={() => setOpen(false)}
-        >
+      {open && <QuickLogForm row={row} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function QuickLogForm({ row, onClose }: { row: CallCoverageRow; onClose: () => void }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(logActivity, {});
+  const router = useRouter();
+  const today = new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    if (state.ok) {
+      router.refresh();
+      const t = setTimeout(onClose, 700);
+      return () => clearTimeout(t);
+    }
+  }, [state, router, onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+      onClick={onClose}
+    >
           <div
             className="bg-surface w-full max-w-md rounded-lg p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}
@@ -90,7 +99,7 @@ function QuickLog({ row }: { row: CallCoverageRow }) {
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={onClose}
                   className="btn-secondary px-3 py-1.5 text-sm"
                   data-tap
                 >
@@ -107,9 +116,7 @@ function QuickLog({ row }: { row: CallCoverageRow }) {
               </div>
             </form>
           </div>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 

@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { fetchAll } from '@/lib/supabase/fetch-all';
 import type {
   AccountMetricsRow,
   AppSettingsRow,
@@ -63,11 +64,16 @@ export async function getPastCadenceCount(cadenceDays: number): Promise<number> 
 
 export async function getAccounts(): Promise<AccountMetricsRow[]> {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from('account_metrics')
-    .select('*')
-    .order('ttm_revenue', { ascending: false });
-  return data ?? [];
+  // fetchAll: the account list exceeds the 1000-row cap — a flat select would
+  // silently drop the smallest accounts from the Accounts page.
+  return fetchAll<AccountMetricsRow>((from, to) =>
+    supabase
+      .from('account_metrics')
+      .select('*')
+      .order('ttm_revenue', { ascending: false })
+      .order('account_id')
+      .range(from, to),
+  );
 }
 
 export async function getAccount(accountId: string): Promise<AccountMetricsRow | null> {
@@ -112,10 +118,19 @@ export type PipelineKpis = {
 /** Pipeline KPIs for the dashboard tiles. */
 export async function getPipelineKpis(newBizTarget: number): Promise<PipelineKpis> {
   const supabase = await createClient();
-  const { data: opps } = await supabase
-    .from('opportunities')
-    .select('stage,amount,weighted_amount,created_at,closed_at');
-  const all = opps ?? [];
+  const all = await fetchAll<{
+    stage: string;
+    amount: number | null;
+    weighted_amount: number | null;
+    created_at: string;
+    closed_at?: string | null;
+  }>((from, to) =>
+    supabase
+      .from('opportunities')
+      .select('stage,amount,weighted_amount,created_at,closed_at')
+      .order('id')
+      .range(from, to),
+  );
   const open = all.filter((o) => o.stage !== 'Won' && o.stage !== 'Lost');
   const openAmount = open.reduce((s, o) => s + (o.amount ?? 0), 0);
   const weightedAmount = open.reduce((s, o) => s + (o.weighted_amount ?? 0), 0);

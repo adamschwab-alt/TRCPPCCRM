@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, OpportunityRow } from '@/types/database';
+import { fetchAll } from '@/lib/supabase/fetch-all';
 
 type Db = SupabaseClient<Database>;
 
@@ -18,12 +19,14 @@ export async function snapshotForecast(admin: Db): Promise<void> {
     .limit(1);
   if (existing && existing.length > 0) return; // already frozen this month
 
-  const { data: opps } = await admin
-    .from('opportunities')
-    .select('owner_id,stage,amount,weighted_amount,forecast_category');
-  const open = ((opps ?? []) as Partial<OpportunityRow>[]).filter(
-    (o) => o.stage !== 'Won' && o.stage !== 'Lost',
+  const opps = await fetchAll<Partial<OpportunityRow>>((from, to) =>
+    admin
+      .from('opportunities')
+      .select('owner_id,stage,amount,weighted_amount,forecast_category')
+      .order('id')
+      .range(from, to),
   );
+  const open = opps.filter((o) => o.stage !== 'Won' && o.stage !== 'Lost');
 
   type Bucket = {
     pipeline_amount: number;
@@ -79,18 +82,25 @@ export type ForecastPeriodReport = {
 
 /** Month-by-month forecast vs actuals (org grain). */
 export async function getForecastReport(supabase: Db): Promise<ForecastPeriodReport[]> {
-  const [{ data: snaps }, { data: opps }] = await Promise.all([
+  const [{ data: snaps }, opps] = await Promise.all([
     supabase
       .from('forecast_snapshots')
       .select('*')
       .is('rep_id', null)
       .order('period', { ascending: false })
       .limit(18),
-    supabase.from('opportunities').select('stage,amount,closed_at').eq('stage', 'Won'),
+    fetchAll<{ stage: string; amount: number | null; closed_at?: string | null }>((from, to) =>
+      supabase
+        .from('opportunities')
+        .select('stage,amount,closed_at')
+        .eq('stage', 'Won')
+        .order('id')
+        .range(from, to),
+    ),
   ]);
 
   const wonByPeriod = new Map<string, number>();
-  for (const o of opps ?? []) {
+  for (const o of opps) {
     const closed = (o as { closed_at?: string | null }).closed_at;
     if (!closed) continue;
     const p = closed.slice(0, 7);

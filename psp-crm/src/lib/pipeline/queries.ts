@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { fetchAll, chunkIds } from '@/lib/supabase/fetch-all';
 import { riskFlags, riskScore, type RiskFlag } from '@/lib/ai/risk';
 import type { OpportunityRow, StageWinProbRow, TargetsRow } from '@/types/database';
 
@@ -14,36 +15,47 @@ export type ContactPickOption = { id: string; account_id: string; name: string; 
 
 async function nameMaps() {
   const supabase = await createClient();
-  const [{ data: accounts }, { data: branches }] = await Promise.all([
-    supabase.from('accounts').select('id,name').order('name'),
-    supabase.from('branches').select('id,account_id,name').order('name'),
+  // fetchAll: both tables exceed PostgREST's 1000-row cap at real book size —
+  // a truncated map would render blank account/branch names on later rows.
+  const [accounts, branches] = await Promise.all([
+    fetchAll<AccountOption>((from, to) =>
+      supabase.from('accounts').select('id,name').order('name').order('id').range(from, to),
+    ),
+    fetchAll<BranchOption>((from, to) =>
+      supabase.from('branches').select('id,account_id,name').order('name').order('id').range(from, to),
+    ),
   ]);
-  return {
-    accounts: (accounts ?? []) as AccountOption[],
-    branches: (branches ?? []) as BranchOption[],
-  };
+  return { accounts, branches };
 }
 
 export async function getPipelineOptions() {
   const supabase = await createClient();
-  const [maps, contactsRes] = await Promise.all([
+  const [maps, contacts] = await Promise.all([
     nameMaps(),
-    supabase.from('contacts').select('id,account_id,name,title').order('name'),
+    // Tolerate a database that hasn't run migration 0007 yet (no contacts table).
+    fetchAll<ContactPickOption>((from, to) =>
+      supabase.from('contacts').select('id,account_id,name,title').order('name').order('id').range(from, to),
+    ).catch(() => [] as ContactPickOption[]),
   ]);
-  // Tolerate a database that hasn't run migration 0007 yet (no contacts table).
-  const contacts = (contactsRes.data ?? []) as ContactPickOption[];
   return { ...maps, contacts };
 }
 
 export async function getOpportunities(): Promise<EnrichedOpportunity[]> {
   const supabase = await createClient();
-  const [{ data: opps }, { accounts, branches }] = await Promise.all([
-    supabase.from('opportunities').select('*').order('expected_close', { ascending: true }),
+  const [opps, { accounts, branches }] = await Promise.all([
+    fetchAll<OpportunityRow>((from, to) =>
+      supabase
+        .from('opportunities')
+        .select('*')
+        .order('expected_close', { ascending: true })
+        .order('id')
+        .range(from, to),
+    ),
     nameMaps(),
   ]);
   const aName = new Map(accounts.map((a) => [a.id, a.name]));
   const bName = new Map(branches.map((b) => [b.id, b.name]));
-  return (opps ?? []).map((o) => ({
+  return opps.map((o) => ({
     ...o,
     account_name: o.account_id ? (aName.get(o.account_id) ?? null) : null,
     branch_name: o.branch_id ? (bName.get(o.branch_id) ?? null) : null,
@@ -83,17 +95,31 @@ export async function getOppRisk(opps: EnrichedOpportunity[]): Promise<Record<st
   if (open.length === 0) return {};
   const supabase = await createClient();
 
-  const { data: hist } = await supabase
-    .from('opportunity_stage_history')
-    .select('opportunity_id,field,old_value,new_value,changed_at')
-    .in(
-      'opportunity_id',
-      open.map((o) => o.id).slice(0, 300),
-    );
+  // Chunk the id list (.in() rides in the URL — hundreds of uuids overflow it)
+  // and page each chunk; tolerate a pre-0008 database with no history table.
+  type HistRow = {
+    opportunity_id: string;
+    field: string;
+    old_value: string | null;
+    new_value: string | null;
+    changed_at: string;
+  };
+  const hist: HistRow[] = [];
+  for (const chunk of chunkIds(open.map((o) => o.id))) {
+    const rows = await fetchAll<HistRow>((from, to) =>
+      supabase
+        .from('opportunity_stage_history')
+        .select('opportunity_id,field,old_value,new_value,changed_at')
+        .in('opportunity_id', chunk)
+        .order('id')
+        .range(from, to),
+    ).catch(() => [] as HistRow[]);
+    hist.push(...rows);
+  }
 
   const lastStageChange = new Map<string, string>();
   const slips = new Map<string, number>();
-  for (const h of hist ?? []) {
+  for (const h of hist) {
     if (h.field === 'stage' || h.field === 'created') {
       const prev = lastStageChange.get(h.opportunity_id);
       if (!prev || h.changed_at > prev) lastStageChange.set(h.opportunity_id, h.changed_at);

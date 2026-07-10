@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { fetchAll, chunkIds } from '@/lib/supabase/fetch-all';
 import type { AccountMetricsRow, BranchMetricsRow, ContactRow } from '@/types/database';
 import { wiringFor, type Wiring } from '@/lib/wiring';
 import {
@@ -64,16 +65,27 @@ type AccountLite = {
 export async function getMyDayData(repId?: string): Promise<MyDayData> {
   const supabase = await createClient();
 
-  const [{ data: branchRows }, { data: accounts }, { data: accountMetrics }, { data: targets }] =
-    await Promise.all([
-      supabase.from('branch_metrics').select('*'),
-      supabase.from('accounts').select('*'),
-      supabase.from('account_metrics').select('account_id,ttm_revenue'),
-      supabase.from('targets').select('cadence_days').eq('id', true).maybeSingle(),
-    ]);
+  // fetchAll everywhere a table can outgrow PostgREST's silent 1000-row cap —
+  // a truncated branch list would simply drop accounts from the worklist.
+  const [branchRows, accounts, accountMetrics, { data: targets }] = await Promise.all([
+    fetchAll<BranchMetricsRow>((from, to) =>
+      supabase.from('branch_metrics').select('*').order('branch_id').range(from, to),
+    ),
+    fetchAll<AccountLite>((from, to) =>
+      supabase.from('accounts').select('*').order('id').range(from, to),
+    ),
+    fetchAll<Pick<AccountMetricsRow, 'account_id' | 'ttm_revenue'>>((from, to) =>
+      supabase
+        .from('account_metrics')
+        .select('account_id,ttm_revenue')
+        .order('account_id')
+        .range(from, to),
+    ),
+    supabase.from('targets').select('cadence_days').eq('id', true).maybeSingle(),
+  ]);
 
   const fallbackCadence = targets?.cadence_days ?? 75;
-  const accts = (accounts ?? []) as AccountLite[];
+  const accts = accounts;
   const accountName = new Map(accts.map((a) => [a.id, a.name]));
   const accountOwner = new Map(accts.map((a) => [a.id, a.owner_id]));
   const accountRating = new Map(accts.map((a) => [a.id, a.relationship_rating ?? 2]));
@@ -93,7 +105,7 @@ export async function getMyDayData(repId?: string): Promise<MyDayData> {
     return w;
   };
 
-  const branches = (branchRows ?? []) as BranchMetricsRow[];
+  const branches = branchRows;
   const effectiveOwner = (b: BranchMetricsRow) =>
     b.owner_id ?? accountOwner.get(b.account_id) ?? null;
 
@@ -103,12 +115,25 @@ export async function getMyDayData(repId?: string): Promise<MyDayData> {
   const touches = new Map<string, TouchSummary>();
   const accountLastTouch = new Map<string, string>();
   if (scoped.length > 0) {
-    const { data: activities } = await supabase
-      .from('activities')
-      .select('branch_id,account_id,type,occurred_at')
-      .order('occurred_at', { ascending: false })
-      .limit(2000);
-    for (const a of activities ?? []) {
+    // Page the FULL recent window (400 days ≈ the longest wiring interval plus
+    // slack) — a flat `.limit(2000)` starves older branches of their last touch
+    // once the team logs a few months of activity, showing "never" wrongly.
+    const sinceIso = new Date(Date.now() - 400 * 86_400_000).toISOString();
+    const activities = await fetchAll<{
+      branch_id: string | null;
+      account_id: string | null;
+      type: string;
+      occurred_at: string;
+    }>((from, to) =>
+      supabase
+        .from('activities')
+        .select('branch_id,account_id,type,occurred_at')
+        .gte('occurred_at', sinceIso)
+        .order('occurred_at', { ascending: false })
+        .order('id')
+        .range(from, to),
+    );
+    for (const a of activities) {
       if (a.branch_id && !touches.has(a.branch_id))
         touches.set(a.branch_id, { lastTouchAt: a.occurred_at, lastTouchType: a.type });
       if (a.account_id && !accountLastTouch.has(a.account_id))
@@ -161,18 +186,32 @@ export async function getMyDayData(repId?: string): Promise<MyDayData> {
   const contactsByAccount: Record<string, ContactOption[]> = {};
   const accountIds = [...new Set(rows.map((r) => r.branch.account_id))];
   if (accountIds.length > 0) {
-    const { data: contacts } = await supabase
-      .from('contacts')
-      .select('id,name,title,tier,account_id')
-      .in('account_id', accountIds.slice(0, 500))
-      .order('tier');
-    for (const c of contacts ?? []) {
-      (contactsByAccount[c.account_id] ??= []).push({
-        id: c.id,
-        name: c.name,
-        title: c.title,
-        tier: c.tier,
-      });
+    // .in() puts the id list in the URL — chunk it (a 500+-id list 400s) and
+    // page each chunk past the 1000-row cap.
+    for (const chunk of chunkIds(accountIds)) {
+      const contacts = await fetchAll<{
+        id: string;
+        name: string;
+        title: string | null;
+        tier: number;
+        account_id: string;
+      }>((from, to) =>
+        supabase
+          .from('contacts')
+          .select('id,name,title,tier,account_id')
+          .in('account_id', chunk)
+          .order('tier')
+          .order('id')
+          .range(from, to),
+      );
+      for (const c of contacts) {
+        (contactsByAccount[c.account_id] ??= []).push({
+          id: c.id,
+          name: c.name,
+          title: c.title,
+          tier: c.tier,
+        });
+      }
     }
   }
 

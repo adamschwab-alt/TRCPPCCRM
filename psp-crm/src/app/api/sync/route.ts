@@ -22,6 +22,13 @@ export async function POST() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ ok: false, error: 'Not signed in.' }, { status: 401 });
 
+  // The proxy's MFA gate skips /api routes, so enforce aal2 here — a stolen
+  // password without the TOTP device must not be able to trigger a sync.
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal?.currentLevel !== 'aal2') {
+    return NextResponse.json({ ok: false, error: 'Two-factor verification required.' }, { status: 403 });
+  }
+
   const { data: profile } = await supabase
     .from('profiles')
     .select('role')

@@ -82,13 +82,12 @@ function gateError(d: z.infer<typeof schema>): string | null {
   return null;
 }
 
-function toRow(input: z.infer<typeof schema>, ownerId: string) {
+function toRow(input: z.infer<typeof schema>) {
   const winProb = input.win_pct == null ? null : input.win_pct / 100;
   const amount = input.amount;
   const row: Partial<import('@/types/database').OpportunityRow> = {
     account_id: input.account_id,
     branch_id: input.branch_id,
-    owner_id: ownerId,
     type: input.type,
     product_line: input.product_line,
     stage: input.stage,
@@ -108,9 +107,17 @@ function toRow(input: z.infer<typeof schema>, ownerId: string) {
     lost_note: input.stage === 'Lost' ? input.lost_note : null,
     notes: input.notes,
   };
-  // forecast_category: only send an explicit override — omitting it lets the
-  // DB trigger auto-map from stage (and record overrides in history).
-  if (input.forecast_category) row.forecast_category = input.forecast_category;
+  // forecast_category: an explicit pick wins; "Auto (from stage)" sends the
+  // stage-derived value EXPLICITLY — merely omitting the column would leave a
+  // previous manual override stuck (the DB trigger only re-maps on stage
+  // change). History still records any resulting change.
+  if (input.forecast_category) {
+    row.forecast_category = input.forecast_category;
+  } else {
+    const auto = { Qualified: 'pipeline', Quoted: 'best_case', Verbal: 'commit' } as const;
+    const mapped = auto[input.stage as keyof typeof auto];
+    if (mapped) row.forecast_category = mapped;
+  }
   return row;
 }
 
@@ -146,7 +153,7 @@ export async function createOpportunity(_prev: FormState, formData: FormData): P
   if (gate) return { error: gate };
 
   const supabase = await createClient();
-  const row = toRow(parsed.data, userId);
+  const row = { ...toRow(parsed.data), owner_id: userId };
   const { data, error } = await supabase.from('opportunities').insert(row).select('id').single();
   if (error) return { error: error.message };
   await logAudit(supabase, 'create', 'opportunity', data?.id ?? null, {
@@ -163,14 +170,16 @@ export async function updateOpportunity(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const { userId } = await requireSession();
+  await requireSession();
   const parsed = parse(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
   const gate = gateError(parsed.data);
   if (gate) return { error: gate };
 
   const supabase = await createClient();
-  const row = toRow(parsed.data, userId);
+  // Deliberately excludes owner_id: a manager editing a rep's deal must not
+  // silently take ownership (which would drop it from the rep's book via RLS).
+  const row = toRow(parsed.data);
   const { error } = await supabase.from('opportunities').update(row).eq('id', id);
   if (error) return { error: error.message };
   await logAudit(supabase, 'update', 'opportunity', id, { stage: row.stage, amount: row.amount });

@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, OpportunityRow } from '@/types/database';
+import { fetchAll } from '@/lib/supabase/fetch-all';
 import { wiringFor } from '@/lib/wiring';
 
 type Db = SupabaseClient<Database>;
@@ -42,50 +43,93 @@ const DAY = 86_400_000;
 
 /** Live data-quality scores (RLS-scoped to the caller). */
 export async function computeDq(supabase: Db): Promise<DqReport> {
-  const [{ data: opps }, { data: accounts }, { data: metrics }, { data: profiles }, { data: touches }] =
-    await Promise.all([
-      supabase.from('opportunities').select('*'),
-      supabase.from('accounts').select('*'),
-      supabase.from('account_metrics').select('account_id,ttm_revenue'),
-      supabase.from('profiles').select('id,full_name,email,is_active'),
+  // fetchAll: unbounded selects cap at 1000 rows; activities use a bounded
+  // 400-day window (longest wiring interval + slack) instead of a flat limit.
+  const nowMs = Date.now();
+  const sinceIso = new Date(nowMs - 400 * DAY).toISOString();
+  const [opps, accounts, metrics, { data: profiles }, touches, branchMetrics] = await Promise.all([
+    fetchAll<OpportunityRow>((from, to) =>
+      supabase.from('opportunities').select('*').order('id').range(from, to),
+    ),
+    fetchAll<{ id: string; owner_id: string | null; relationship_rating?: number | null }>(
+      (from, to) => supabase.from('accounts').select('*').order('id').range(from, to),
+    ),
+    fetchAll<{ account_id: string; ttm_revenue: number }>((from, to) =>
+      supabase
+        .from('account_metrics')
+        .select('account_id,ttm_revenue')
+        .order('account_id')
+        .range(from, to),
+    ),
+    supabase.from('profiles').select('id,full_name,email,is_active'),
+    fetchAll<{ account_id: string | null; occurred_at: string }>((from, to) =>
       supabase
         .from('activities')
         .select('account_id,occurred_at')
         .not('account_id', 'is', null)
+        .gte('occurred_at', sinceIso)
         .order('occurred_at', { ascending: false })
-        .limit(5000),
-    ]);
+        .order('id')
+        .range(from, to),
+    ),
+    fetchAll<{ account_id: string; owner_id: string | null; ttm_revenue: number }>((from, to) =>
+      supabase
+        .from('branch_metrics')
+        .select('account_id,owner_id,ttm_revenue')
+        .order('branch_id')
+        .range(from, to),
+    ),
+  ]);
 
-  const now = Date.now();
+  const now = nowMs;
   const name = new Map((profiles ?? []).map((p) => [p.id, p.full_name || p.email]));
-  const ttm = new Map((metrics ?? []).map((m) => [m.account_id, m.ttm_revenue]));
-  const rating = new Map(
-    ((accounts ?? []) as { id: string; relationship_rating?: number | null }[]).map((a) => [
-      a.id,
-      a.relationship_rating ?? 2,
-    ]),
-  );
+  const ttm = new Map(metrics.map((m) => [m.account_id, m.ttm_revenue]));
+  const rating = new Map(accounts.map((a) => [a.id, a.relationship_rating ?? 2]));
   const lastTouch = new Map<string, number>();
-  for (const t of touches ?? []) {
+  for (const t of touches) {
     if (t.account_id && !lastTouch.has(t.account_id))
       lastTouch.set(t.account_id, new Date(t.occurred_at).getTime());
   }
 
+  // Dominant-owner attribution: the rep owning most of the account's branch TTM
+  // (effective owner = branch owner else account owner). Multi-rep accounts have
+  // accounts.owner_id null, so per-rep freshness would otherwise skip them.
+  const accountOwner = new Map(accounts.map((a) => [a.id, a.owner_id]));
+  const ttmByAccountRep = new Map<string, Map<string, number>>();
+  for (const b of branchMetrics) {
+    const eff = b.owner_id ?? accountOwner.get(b.account_id) ?? null;
+    if (!eff) continue;
+    let perRepTtm = ttmByAccountRep.get(b.account_id);
+    if (!perRepTtm) ttmByAccountRep.set(b.account_id, (perRepTtm = new Map()));
+    perRepTtm.set(eff, (perRepTtm.get(eff) ?? 0) + (b.ttm_revenue ?? 0));
+  }
+  const dominantOwner = (accountId: string): string | null => {
+    const perRepTtm = ttmByAccountRep.get(accountId);
+    if (!perRepTtm || perRepTtm.size === 0) return accountOwner.get(accountId) ?? null;
+    let best: string | null = null;
+    let bestTtm = -1;
+    for (const [rep, t] of perRepTtm) {
+      if (t > bestTtm) {
+        best = rep;
+        bestTtm = t;
+      }
+    }
+    return best;
+  };
+
   // Account freshness: inside wiring window?
   type Fresh = { ok: boolean; ownerId: string | null };
   const freshRows: Fresh[] = [];
-  for (const a of (accounts ?? []) as { id: string; owner_id: string | null }[]) {
+  for (const a of accounts) {
     const w = wiringFor(ttm.get(a.id) ?? 0, rating.get(a.id));
     if (w.intervalDays == null) continue; // no cadence → excluded
     const lt = lastTouch.get(a.id);
     const ok = lt != null && (now - lt) / DAY <= w.intervalDays;
-    freshRows.push({ ok, ownerId: a.owner_id });
+    freshRows.push({ ok, ownerId: dominantOwner(a.id) });
   }
 
   // Opportunity completeness + discipline.
-  const active = ((opps ?? []) as OpportunityRow[]).filter(
-    (o) => o.stage !== 'Won' && o.stage !== 'Lost',
-  );
+  const active = opps.filter((o) => o.stage !== 'Won' && o.stage !== 'Lost');
   const sevenDaysAgo = new Date(now - 7 * DAY).toISOString().slice(0, 10);
   const isStalled = (o: OpportunityRow) => !o.next_date || o.next_date < sevenDaysAgo;
   const violatesGate = (o: OpportunityRow) => {

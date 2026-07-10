@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { fetchAll } from '@/lib/supabase/fetch-all';
 import { wiringFor, type Wiring } from '@/lib/wiring';
 
 /**
@@ -64,35 +65,87 @@ export type ActivityData = {
 
 const DAY = 86_400_000;
 
+type TouchLite = {
+  account_id: string | null;
+  user_id: string | null;
+  type: string;
+  occurred_at: string;
+};
+
 export async function getActivityData(): Promise<ActivityData> {
   const supabase = await createClient();
-  const [{ data: accounts }, { data: metrics }, { data: profiles }, { data: touches }] =
-    await Promise.all([
-      supabase.from('accounts').select('*'),
-      supabase.from('account_metrics').select('account_id,account_name,ttm_revenue,prior_revenue'),
-      supabase.from('profiles').select('id,full_name,email,is_active'),
+  // fetchAll: accounts/metrics/branches exceed the 1000-row PostgREST cap at
+  // real book size; activities are paged over a bounded 400-day window (longest
+  // wiring interval plus slack) instead of a flat limit that starves old touches.
+  const sinceIso = new Date(Date.now() - 400 * DAY).toISOString();
+  const [accounts, metrics, { data: profiles }, touches, branchMetrics] = await Promise.all([
+    fetchAll<{ id: string; name: string; owner_id: string | null; relationship_rating?: number | null }>(
+      (from, to) => supabase.from('accounts').select('*').order('id').range(from, to),
+    ),
+    fetchAll<{ account_id: string; account_name: string; ttm_revenue: number; prior_revenue: number }>(
+      (from, to) =>
+        supabase
+          .from('account_metrics')
+          .select('account_id,account_name,ttm_revenue,prior_revenue')
+          .order('account_id')
+          .range(from, to),
+    ),
+    supabase.from('profiles').select('id,full_name,email,is_active'),
+    fetchAll<TouchLite>((from, to) =>
       supabase
         .from('activities')
         .select('account_id,user_id,type,occurred_at')
         .not('account_id', 'is', null)
+        .gte('occurred_at', sinceIso)
         .order('occurred_at', { ascending: false })
-        .limit(5000),
-    ]);
+        .order('id')
+        .range(from, to),
+    ),
+    fetchAll<{ account_id: string; owner_id: string | null; ttm_revenue: number }>((from, to) =>
+      supabase
+        .from('branch_metrics')
+        .select('account_id,owner_id,ttm_revenue')
+        .order('branch_id')
+        .range(from, to),
+    ),
+  ]);
 
   const now = Date.now();
   const name = new Map((profiles ?? []).map((p) => [p.id, p.full_name || p.email]));
-  const metric = new Map((metrics ?? []).map((m) => [m.account_id, m]));
-  const rating = new Map(
-    ((accounts ?? []) as { id: string; relationship_rating?: number | null }[]).map((a) => [
-      a.id,
-      a.relationship_rating ?? 2,
-    ]),
-  );
+  const metric = new Map(metrics.map((m) => [m.account_id, m]));
+  const rating = new Map(accounts.map((a) => [a.id, a.relationship_rating ?? 2]));
+
+  // Attribution: the rep who owns most of the account's branch TTM (effective
+  // owner = branch owner, else parent-account owner). Multi-rep accounts like
+  // United Rentals have accounts.owner_id null — attributing by account owner
+  // alone would drop their whole book from every scorecard.
+  const accountOwner = new Map(accounts.map((a) => [a.id, a.owner_id]));
+  const ttmByAccountRep = new Map<string, Map<string, number>>();
+  for (const b of branchMetrics) {
+    const eff = b.owner_id ?? accountOwner.get(b.account_id) ?? null;
+    if (!eff) continue;
+    let perRep = ttmByAccountRep.get(b.account_id);
+    if (!perRep) ttmByAccountRep.set(b.account_id, (perRep = new Map()));
+    perRep.set(eff, (perRep.get(eff) ?? 0) + (b.ttm_revenue ?? 0));
+  }
+  const dominantOwner = (accountId: string): string | null => {
+    const perRep = ttmByAccountRep.get(accountId);
+    if (!perRep || perRep.size === 0) return accountOwner.get(accountId) ?? null;
+    let best: string | null = null;
+    let bestTtm = -1;
+    for (const [rep, ttm] of perRep) {
+      if (ttm > bestTtm) {
+        best = rep;
+        bestTtm = ttm;
+      }
+    }
+    return best;
+  };
 
   // Per-account touch aggregates (touches are newest-first).
   const lastTouch = new Map<string, { at: string; type: string }>();
   const touches90 = new Map<string, number>();
-  for (const t of touches ?? []) {
+  for (const t of touches) {
     if (!t.account_id) continue;
     if (!lastTouch.has(t.account_id)) lastTouch.set(t.account_id, { at: t.occurred_at, type: t.type });
     if (now - new Date(t.occurred_at).getTime() <= 90 * DAY)
@@ -100,7 +153,7 @@ export async function getActivityData(): Promise<ActivityData> {
   }
 
   const rows: CallCoverageRow[] = [];
-  for (const a of (accounts ?? []) as { id: string; name: string; owner_id: string | null }[]) {
+  for (const a of accounts) {
     const m = metric.get(a.id);
     const w = wiringFor(m?.ttm_revenue ?? 0, rating.get(a.id));
     const lt = lastTouch.get(a.id) ?? null;
@@ -116,11 +169,12 @@ export async function getActivityData(): Promise<ActivityData> {
         status = dueIn < 0 ? 'due' : 'ok';
       }
     }
+    const ownerId = dominantOwner(a.id);
     rows.push({
       account_id: a.id,
       account_name: a.name,
-      owner_id: a.owner_id,
-      owner_name: a.owner_id ? (name.get(a.owner_id) ?? null) : null,
+      owner_id: ownerId,
+      owner_name: ownerId ? (name.get(ownerId) ?? null) : null,
       ttm_revenue: m?.ttm_revenue ?? 0,
       prior_revenue: m?.prior_revenue ?? 0,
       wiring: w,
@@ -156,7 +210,7 @@ export async function getActivityData(): Promise<ActivityData> {
   }
   const weekIdx = new Map(weeks.map((w, i) => [w, i]));
   const perRepCounts = new Map<string, number[]>();
-  for (const t of touches ?? []) {
+  for (const t of touches) {
     if (!t.user_id) continue;
     const wk = weekStart(new Date(t.occurred_at));
     const idx = weekIdx.get(wk);
@@ -189,7 +243,7 @@ export async function getActivityData(): Promise<ActivityData> {
 
     let wk = 0;
     let wk4 = 0;
-    for (const t of touches ?? []) {
+    for (const t of touches) {
       if (t.user_id !== p.id) continue;
       const age = now - new Date(t.occurred_at).getTime();
       if (age <= 7 * DAY) wk++;
@@ -217,7 +271,7 @@ export async function getActivityData(): Promise<ActivityData> {
   const dueNow = cadenced.filter((r) => r.status !== 'ok').length;
   const bookTtm = rows.reduce((s, r) => s + r.ttm_revenue, 0);
   const bookPrior = rows.reduce((s, r) => s + r.prior_revenue, 0);
-  const touchesThisWeek = (touches ?? []).filter(
+  const touchesThisWeek = touches.filter(
     (t) => now - new Date(t.occurred_at).getTime() <= 7 * DAY,
   ).length;
 

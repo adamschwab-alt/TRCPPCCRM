@@ -13,7 +13,8 @@ export const dynamic = 'force-dynamic';
  * the audit log records that (and when) it was generated.
  */
 export async function GET() {
-  await requireRole('admin');
+  // Managers see the link on the Reports shelf too — match the UI.
+  await requireRole('admin', 'manager');
   const supabase = await createClient();
 
   const [kpis, accounts, whitespace, settings, profiles, opps] = await Promise.all([
