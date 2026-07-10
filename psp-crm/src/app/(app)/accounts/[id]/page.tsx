@@ -22,12 +22,31 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   // Wiring + contacts (0007). select('*') and a tolerated contacts error keep
   // the page working on a database that hasn't run the migration yet.
   const supabase = await createClient();
-  const [{ data: accountRow }, contactsRes] = await Promise.all([
+  const [{ data: accountRow }, contactsRes, { data: profiles }] = await Promise.all([
     supabase.from('accounts').select('*').eq('id', id).maybeSingle(),
     supabase.from('contacts').select('*').eq('account_id', id).order('tier'),
+    supabase.from('profiles').select('id,full_name,email'),
   ]);
   const rating = (accountRow as { relationship_rating?: number } | null)?.relationship_rating ?? 2;
   const contacts: ContactRow[] = contactsRes.data ?? [];
+  const repName = new Map((profiles ?? []).map((p) => [p.id, p.full_name || p.email]));
+  const accountOwnerId = (accountRow as { owner_id?: string | null } | null)?.owner_id ?? null;
+
+  // Per-branch wiring rollup for the branch table: local contacts (senior tier
+  // first) and the responsible rep — branch owner, else account owner, else the
+  // "covered by" name carried in from the wiring workbook.
+  const contactsByBranch = new Map<string, ContactRow[]>();
+  for (const c of contacts) {
+    if (!c.branch_id) continue;
+    if (!contactsByBranch.has(c.branch_id)) contactsByBranch.set(c.branch_id, []);
+    contactsByBranch.get(c.branch_id)!.push(c);
+  }
+  for (const list of contactsByBranch.values()) list.sort((a, b) => a.tier - b.tier);
+  const repFor = (branchId: string, ownerId: string | null): string | null => {
+    if (ownerId) return repName.get(ownerId) ?? null;
+    if (accountOwnerId) return repName.get(accountOwnerId) ?? null;
+    return contactsByBranch.get(branchId)?.find((c) => c.covered_by)?.covered_by ?? null;
+  };
 
   return (
     <div>
@@ -102,11 +121,13 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
       <div className="mt-6">
         <SectionTitle>Branches ({branches.length})</SectionTitle>
         <Card className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[920px] text-sm">
             <thead>
               <tr className="border-line text-muted border-b text-left text-xs uppercase">
                 <th className="px-4 py-2.5">Branch</th>
                 <th className="px-4 py-2.5">Location</th>
+                <th className="px-4 py-2.5">Contact</th>
+                <th className="px-4 py-2.5">Rep</th>
                 <th className="px-4 py-2.5 text-right">TTM</th>
                 <th className="px-4 py-2.5 text-right">Δ%</th>
                 <th className="px-4 py-2.5 text-right">Idle</th>
@@ -131,6 +152,25 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
                   </td>
                   <td className="text-muted px-4 py-2.5">
                     {[b.city, b.state].filter(Boolean).join(', ') || '—'}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {(() => {
+                      const list = contactsByBranch.get(b.branch_id) ?? [];
+                      if (list.length === 0) return <span className="text-muted">—</span>;
+                      const first = list[0];
+                      return (
+                        <span title={list.map((c) => `${c.name} (T${c.tier})`).join(', ')}>
+                          <span className="text-charcoal">{first.name}</span>
+                          <span className="text-muted text-xs"> T{first.tier}</span>
+                          {list.length > 1 && (
+                            <span className="text-brand-700 text-xs"> +{list.length - 1}</span>
+                          )}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  <td className="text-muted px-4 py-2.5">
+                    {repFor(b.branch_id, b.owner_id) ?? '—'}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {fmtCurrencyShort(b.ttm_revenue)}
