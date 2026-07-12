@@ -45,6 +45,12 @@ export async function GET(request: NextRequest) {
     } catch {
       /* pre-0011 database — next night catches up */
     }
+    // Prune presence heartbeats older than 90 days (the activity report only
+    // reads 30) — keeps the usage_events table from growing forever.
+    await supabase
+      .from('usage_events')
+      .delete()
+      .lt('occurred_at', new Date(Date.now() - 90 * 86_400_000).toISOString());
     return NextResponse.json({ ok: true, result, outcomesFilled });
   } catch (e) {
     return NextResponse.json(

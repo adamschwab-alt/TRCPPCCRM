@@ -336,6 +336,13 @@ export type AuditLogRow = {
   created_at: string;
 };
 
+export type UsageEventRow = {
+  id: number;
+  user_id: string;
+  path: string | null;
+  occurred_at: string;
+};
+
 type TableDef<Row, Insert = Partial<Row>, Update = Partial<Row>> = {
   Row: Row;
   Insert: Insert;
@@ -366,6 +373,7 @@ export interface Database {
       dq_snapshots: TableDef<DqSnapshotRow>;
       forecast_snapshots: TableDef<ForecastSnapshotRow>;
       audit_log: TableDef<AuditLogRow>;
+      usage_events: TableDef<UsageEventRow>;
       targets: TableDef<TargetsRow>;
       app_settings: TableDef<AppSettingsRow>;
     };

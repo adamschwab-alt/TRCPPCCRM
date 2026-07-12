@@ -116,6 +116,17 @@ export default async function AdminPage() {
       </Card>
 
       <Card className="p-4">
+        <SectionTitle>User activity</SectionTitle>
+        <p className="text-muted mb-3 text-xs">
+          Admin-only report: who&rsquo;s been in the CRM, how much time they&rsquo;ve spent, and
+          every change they&rsquo;ve made.
+        </p>
+        <a href="/admin/activity" className="btn-secondary" data-tap>
+          View user activity →
+        </a>
+      </Card>
+
+      <Card className="p-4">
         <SectionTitle>Users ({profiles.length})</SectionTitle>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
