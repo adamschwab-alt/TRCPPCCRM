@@ -41,13 +41,19 @@ export async function getActivityReport(): Promise<{
   users: ActivityReportRow[];
   changes: ChangeEntry[];
   trackingLive: boolean;
+  /** Read failures, verbatim — shown on the page instead of a silently empty table. */
+  warnings: string[];
 }> {
   const supabase = await createClient();
   const sinceIso = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const warnings: string[] = [];
+  const errMsg = (e: unknown) =>
+    (e as { message?: string } | null)?.message ?? String(e);
 
   const [profilesRes, eventsRes, auditRes] = await Promise.all([
     supabase.from('profiles').select('id,full_name,email,role,is_active'),
-    // Tolerate migration 0013 not being applied yet (error → empty report).
+    // A missing usage_events table (migration 0013 not applied) surfaces as a
+    // warning, not a silently empty column.
     fetchAll<{ user_id: string; occurred_at: string }>((from, to) =>
       supabase
         .from('usage_events')
@@ -56,7 +62,10 @@ export async function getActivityReport(): Promise<{
         .order('occurred_at')
         .order('id')
         .range(from, to),
-    ).catch(() => [] as { user_id: string; occurred_at: string }[]),
+    ).catch((e) => {
+      warnings.push(`Time-on-site unavailable — usage_events read failed: ${errMsg(e)}`);
+      return [] as { user_id: string; occurred_at: string }[];
+    }),
     fetchAll<{
       id: number;
       actor_id: string | null;
@@ -73,8 +82,12 @@ export async function getActivityReport(): Promise<{
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .range(from, to),
-    ).catch(() => []),
+    ).catch((e) => {
+      warnings.push(`Change history unavailable — audit_log read failed: ${errMsg(e)}`);
+      return [];
+    }),
   ]);
+  if (profilesRes.error) warnings.push(`Profiles read failed: ${profilesRes.error.message}`);
 
   const profiles = profilesRes.data ?? [];
   const usage = summarizeUsage(eventsRes, Date.now());
@@ -118,5 +131,5 @@ export async function getActivityReport(): Promise<{
     detail: describeDiff(a.diff),
   }));
 
-  return { users, changes, trackingLive: eventsRes.length > 0 };
+  return { users, changes, trackingLive: eventsRes.length > 0, warnings };
 }

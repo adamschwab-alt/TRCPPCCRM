@@ -20,7 +20,7 @@ const fmtWhen = (iso: string | null) =>
 /** Admin-only: who is using the CRM, for how long, and what they changed. */
 export default async function ActivityPage() {
   await requireRole('admin');
-  const { users, changes, trackingLive } = await getActivityReport();
+  const { users, changes, trackingLive, warnings } = await getActivityReport();
 
   return (
     <div className="space-y-6">
@@ -30,6 +30,15 @@ export default async function ActivityPage() {
           ← Back to Admin
         </Link>
       </div>
+
+      {warnings.map((w) => (
+        <p
+          key={w}
+          className="rounded-md bg-[var(--color-atrisk-bg)] px-3 py-2 text-xs text-[var(--color-atrisk)]"
+        >
+          {w}
+        </p>
+      ))}
 
       <Card className="p-4">
         <SectionTitle>Usage (last 30 days)</SectionTitle>
