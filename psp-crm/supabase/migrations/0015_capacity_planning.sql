@@ -50,7 +50,7 @@ create policy scheduled_touches_rep_write on scheduled_touches
 drop policy if exists scheduled_touches_staff_write on scheduled_touches;
 create policy scheduled_touches_staff_write on scheduled_touches
   for insert to authenticated
-  using (is_staff()) with check (is_staff());
+  with check (is_staff());
 
 -- ── v_rep_workload: field rep capacity & utilization ────────────────────────
 -- Aggregates branch calls/yr + tier touches/yr by assigned rep, across scenarios.
@@ -224,8 +224,8 @@ select
   ), 0) as branch_calls_yr,
   (select full_name from profiles where id = d.dm_profile_id) as dm_name,
   (select full_name from profiles where id = d.dsm_profile_id) as dsm_name,
-  coalesce(sum(ct.cadence_touches_yr), 0) filter (where ct.psp_owner_type = 'District Manager') as dm_tier_touches_yr,
-  coalesce(sum(ct.cadence_touches_yr), 0) filter (where ct.psp_owner_type = 'District Sales Manager') as dsm_tier_touches_yr
+  coalesce(sum(ct.cadence_touches_yr) filter (where ct.psp_owner_type = 'District Manager'), 0) as dm_tier_touches_yr,
+  coalesce(sum(ct.cadence_touches_yr) filter (where ct.psp_owner_type = 'District Sales Manager'), 0) as dsm_tier_touches_yr
 from districts d
 left join accounts a on d.account_id = a.id
 left join branches b on b.district_id = d.id
