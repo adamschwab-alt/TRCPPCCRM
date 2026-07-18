@@ -243,11 +243,21 @@ export async function getAccountRoutingSummary(
 ) {
   const { data: tiers, error } = await supabase
     .from('contact_tiers')
-    .select('tier, routing, psp_owner_type, cadence_touches_yr, count(*)')
-    .eq('account_id', accountId)
-    .group_by('tier, routing, psp_owner_type, cadence_touches_yr');
+    .select('tier, routing, psp_owner_type, cadence_touches_yr')
+    .eq('account_id', accountId);
 
   if (error) throw error;
 
-  return tiers || [];
+  // PostgREST can't GROUP BY from the client; aggregate here instead.
+  const groups = new Map<
+    string,
+    (typeof tiers extends (infer T)[] | null ? T : never) & { count: number }
+  >();
+  for (const t of tiers || []) {
+    const key = `${t.tier}|${t.routing}|${t.psp_owner_type}|${t.cadence_touches_yr}`;
+    const existing = groups.get(key);
+    if (existing) existing.count += 1;
+    else groups.set(key, { ...t, count: 1 });
+  }
+  return [...groups.values()];
 }

@@ -295,7 +295,7 @@ export async function createScheduledTouch(
   await logAudit(supabase, 'create_scheduled_touch', 'scheduled_touch', data.id, {
     contact_tier_id: contactTierId,
     assigned_to_id: assignedToId,
-    scheduled_date,
+    scheduled_date: scheduledDate.toISOString().split('T')[0],
     touch_type: touchType,
   });
 
