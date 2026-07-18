@@ -88,6 +88,7 @@ export type BranchRow = {
   state: string | null;
   city: string | null;
   owner_id: string | null;
+  district_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -175,6 +176,111 @@ export type AccountMetricsRow = {
   days_idle: number | null;
   status: BranchStatus;
   coverage_rag: CoverageRag;
+};
+
+// ── District & Tier Coverage Types (from migrations 0014-0015) ────────────────
+
+export type ContactTier =
+  | 'Corporate'
+  | 'Regional-VP'
+  | 'Regional-Fleet'
+  | 'District'
+  | 'Fleet'
+  | 'Branch-GM'
+  | 'Europe'
+  | 'Purchasing/Finance';
+
+export type PspOwnerType = 'Senior PS Leadership' | 'Territory Rep' | 'District Manager' | 'District Sales Manager';
+export type RoutingType = 'Territory Rep' | 'Defer to Branch' | 'Through District' | 'Senior PS Leadership' | '—';
+export type TransitionStatus = 'pending' | 'scheduled' | 'completed' | 'cancelled';
+
+export type DistrictRow = {
+  id: string;
+  account_id: string;
+  name: string;
+  code: string | null;
+  dm_profile_id: string | null;
+  dsm_profile_id: string | null;
+  region_text: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ContactTierRow = {
+  id: string;
+  contact_id: string;
+  account_id: string;
+  tier: ContactTier;
+  cadence_touches_yr: number;
+  routing: RoutingType;
+  psp_owner_type: PspOwnerType;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlannedChangeRow = {
+  id: string;
+  branch_id: string;
+  current_owner_profile_id: string | null;
+  new_owner_profile_id: string;
+  scheduled_date: string;
+  reason: string | null;
+  status: TransitionStatus;
+  notes: string | null;
+  created_by_profile_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduledTouchRow = {
+  id: string;
+  contact_tier_id: string;
+  assigned_to_id: string | null;
+  scheduled_date: string;
+  touch_type: string;
+  outcome_status: string | null;
+  outcome_notes: string | null;
+  activity_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// ── View Rows ────────────────────────────────────────────────────────────────
+
+export type RepWorkloadRow = {
+  rep_id: string;
+  rep_name: string | null;
+  scenario: string;
+  branch_count: number;
+  branch_calls_yr: number;
+  tier_touches_yr: number;
+  total_load_yr: number;
+  capacity_per_rep: number;
+  utilization_pct: number;
+};
+
+export type AccountInvestmentRow = {
+  account_id: string;
+  account_name: string;
+  branch_count: number;
+  branch_calls_yr: number;
+  tier_touches_yr: number;
+  total_touches_yr: number;
+};
+
+export type DistrictCoverageRow = {
+  district_id: string;
+  district_name: string;
+  district_code: string | null;
+  account_id: string;
+  account_name: string;
+  branch_count: number;
+  branch_calls_yr: number;
+  dm_name: string | null;
+  dsm_name: string | null;
+  dm_tier_touches_yr: number;
+  dsm_tier_touches_yr: number;
 };
 
 export type PortfolioKpisRow = {
