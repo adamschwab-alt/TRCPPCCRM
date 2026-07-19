@@ -51,7 +51,34 @@ export async function GET(request: NextRequest) {
       .from('usage_events')
       .delete()
       .lt('occurred_at', new Date(Date.now() - 90 * 86_400_000).toISOString());
-    return NextResponse.json({ ok: true, result, outcomesFilled });
+
+    // Nightly coverage: execute scheduled rep transitions & check capacity alerts
+    let transitionsExecuted = 0;
+    let capacityAlerts = 0;
+    try {
+      const { executeScheduledTransitions, checkRepUtilizationAlerts } = await import(
+        '@/lib/coverage/alerts'
+      );
+      const transResult = await executeScheduledTransitions(supabase);
+      transitionsExecuted = transResult.executed;
+      if (transResult.errors.length > 0) {
+        console.warn('[cron] Transition execution errors:', transResult.errors);
+      }
+      const alerts = await checkRepUtilizationAlerts(supabase);
+      capacityAlerts = alerts.length;
+      if (capacityAlerts > 0) {
+        console.warn(
+          `[cron] Capacity alerts: ${alerts
+            .map((a) => `${a.repName} ${Math.round(a.utilization)}%`)
+            .join(', ')}`,
+        );
+      }
+    } catch (err) {
+      // pre-0014 database or transient error — next night catches up
+      console.warn('[cron] Coverage execution skipped:', err instanceof Error ? err.message : err);
+    }
+
+    return NextResponse.json({ ok: true, result, outcomesFilled, transitionsExecuted, capacityAlerts });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : 'sync failed' },
